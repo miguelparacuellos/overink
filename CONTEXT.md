@@ -58,6 +58,12 @@ El Overlay está oculto y el sistema se comporta con normalidad. El Canvas se co
 y reaparece al volver a Armed.
 _Avoid_: cerrado, apagado, desactivado — todos sugieren que se pierde el Canvas, y no se pierde
 
+**Auto-Dismiss**:
+El paso automático de Armed a Dismissed tras quince minutos sin un solo evento de entrada. Si
+salta durante Editing, el Label en curso se **confirma** antes de ocultar: pasar a Dismissed
+nunca destruye trabajo, tampoco cuando lo decide la app.
+_Avoid_: timeout, autocierre — no se cierra nada, solo se oculta
+
 **Clear**:
 La acción que vacía el Canvas de golpe. Es deliberadamente distinta de pasar a Dismissed:
 Dismissed oculta, Clear destruye. Aun así es reversible, porque es una operación más del
@@ -67,7 +73,8 @@ _Avoid_: borrar, limpiar, reset
 **History**:
 La pila de **operaciones** aplicadas al Canvas, no de Marks. Añadir un Mark, borrar uno con el
 Eraser y vaciar el Canvas con Clear son todas operaciones, y por eso Undo puede revertir
-cualquiera de las tres por igual.
+cualquiera de las tres por igual. Guarda como mucho las cien últimas: al superarlas, la más
+antigua se descarta y deja de ser reversible.
 _Avoid_: historial de trazos, lista de deshacer
 
 **Undo**:
