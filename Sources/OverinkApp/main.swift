@@ -9,7 +9,7 @@ let app = NSApplication.shared
 // lo que permite ejecutar el binario a pelo sin que aparezca en el Dock.
 app.setActivationPolicy(.accessory)
 
-let menuBar = MenuBarController()
-app.delegate = menuBar
+let delegate = AppDelegate()
+app.delegate = delegate
 
 app.run()

@@ -13,5 +13,8 @@ let package = Package(
         .target(name: "OverinkCore"),
         // La shell de AppKit. Sin decisiones de dominio propias.
         .executableTarget(name: "OverinkApp", dependencies: ["OverinkCore"]),
+        // Los tests conducen el core por su interfaz de comandos; la shell de AppKit no
+        // se testea automáticamente (el spec dice qué se verifica a mano y cómo).
+        .testTarget(name: "OverinkCoreTests", dependencies: ["OverinkCore"]),
     ]
 )

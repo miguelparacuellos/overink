@@ -14,7 +14,10 @@ corrección, por encima de cualquier funcionalidad.
 2. **Nunca poner la ventana por encima de las alertas del sistema.** El nivel debe ser el más
    bajo que aún cubra barra de menús y Dock, para que un diálogo del sistema o el de Forzar
    salida siga apareciendo *encima* del Overlay. El nivel concreto se verifica probándolo, no
-   suponiéndolo.
+   suponiéndolo. **Verificado en el ticket 02**: el nivel es
+   `CGWindowLevelForKey(.mainMenuWindow) + 1` (25), que cubre la barra de menús (24) y el Dock
+   (20), mientras que el diálogo de Forzar salida aparece en el 996 y queda por encima. No
+   hace falta sacrificar la cobertura de la barra de menús.
 3. **Esc nunca es inerte.** Desde Editing cancela el Label; desde Armed pasa a Dismissed. No
    existe ningún estado en el que pulsar Esc no haga nada.
 
