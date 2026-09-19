@@ -15,7 +15,7 @@ El script compila con SwiftPM forzando el toolchain de las Command Line Tools, e
 proyecto de Xcode en el repositorio.
 
 Overink vive solo en la barra de menús: no aparece en el Dock ni en Cmd+Tab, y se sale
-desde su propio menú. `Ctrl+Option+D` monta y quita el Overlay sobre la pantalla donde
+desde su propio menú. `Ctrl+Shift+D` monta y quita el Overlay sobre la pantalla donde
 esté el cursor; `Esc` también lo quita.
 
 ## Desarrollo

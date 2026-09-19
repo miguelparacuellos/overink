@@ -7,7 +7,7 @@ import AppKit
 final class MenuBarController {
     private var statusItem: NSStatusItem?
 
-    /// - Parameter hotKeyRegistered: si Carbon aceptó `Ctrl+Option+D`. Si no lo hizo, el
+    /// - Parameter hotKeyRegistered: si Carbon aceptó `Ctrl+Shift+D`. Si no lo hizo, el
     ///   menú es el único sitio donde el usuario puede enterarse: la app sigue viva pero
     ///   no responde al atajo.
     func install(hotKeyRegistered: Bool) {
@@ -29,8 +29,8 @@ final class MenuBarController {
 
         let hint = NSMenuItem(
             title: hotKeyRegistered
-                ? "Pulsa ⌃⌥D para anotar"
-                : "⌃⌥D está cogido por otra aplicación",
+                ? "Pulsa ⌃⇧D para anotar"
+                : "⌃⇧D está cogido por otra aplicación",
             action: nil,
             keyEquivalent: ""
         )

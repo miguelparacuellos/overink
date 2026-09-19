@@ -24,7 +24,7 @@ final class GlobalHotKey {
 
     /// - Parameters:
     ///   - keyCode: código virtual de la tecla (`kVK_ANSI_D` y compañía).
-    ///   - modifiers: máscara de Carbon (`controlKey`, `optionKey`…), no la de AppKit.
+    ///   - modifiers: máscara de Carbon (`controlKey`, `shiftKey`…), no la de AppKit.
     /// - Returns: `nil` si Carbon rechaza el atajo, que es lo que pasa cuando otra
     ///   aplicación ya lo tiene cogido.
     init?(keyCode: UInt32, modifiers: UInt32, handler: @escaping () -> Void) {

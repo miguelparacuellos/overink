@@ -12,7 +12,7 @@ del sistema aparezcan por encima. Se comprueba probándolo, no leyendo documenta
 
 **Status:** resolved
 
-- [x] Ctrl+Option+D alterna entre Armed y Dismissed desde cualquier aplicación
+- [x] Ctrl+Shift+D alterna entre Armed y Dismissed desde cualquier aplicación
 - [x] El atajo se registra sin requerir permiso de Accesibilidad ni ningún otro permiso de TCC
 - [x] El Overlay cubre la pantalla que contenía el cursor en el instante de pasar a Armed
 - [x] El Stage no cambia aunque el cursor se mueva a la otra pantalla mientras sigue en Armed
@@ -45,7 +45,7 @@ la barra de menús (24) y el Dock (20). Comprobado con la app real y
 Todo sobre `build/Overink.app`, simulando las teclas con `System Events` y leyendo el estado
 real del sistema con `CGWindowListCopyWindowInfo`, no la interfaz.
 
-- **El atajo alterna desde cualquier aplicación**: con TextEdit al frente, `Ctrl+Option+D`
+- **El atajo alterna desde cualquier aplicación**: con TextEdit al frente, `Ctrl+Shift+D`
   hace aparecer la ventana de 1920×1080; pulsado otra vez, desaparece y solo queda el ítem de
   la barra de menús.
 - **Sin permisos**: `RegisterEventHotKey` devuelve `noErr` y el log unificado no registra
@@ -90,6 +90,6 @@ real del sistema con `CGWindowListCopyWindowInfo`, no la interfaz.
   que se vuelve a hacer clic en el Overlay. La salida que no depende del foco es el atajo
   global, que va por Carbon; la que no depende ni del hilo principal es el watchdog
   (ticket 12).
-- El menú de la barra dice «Pulsa ⌃⌥D para anotar», o avisa si Carbon rechazó el atajo. Es
+- El menú de la barra dice «Pulsa ⌃⇧D para anotar», o avisa si Carbon rechazó el atajo. Es
   superficie del ticket 01, pero un atajo que no se registra y no avisa en ningún sitio sería
   un fallo mudo.

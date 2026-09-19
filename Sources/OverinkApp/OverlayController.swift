@@ -16,13 +16,13 @@ final class OverlayController {
     /// reloj monótono: el Auto-Dismiss no debe descolocarse porque cambie la hora.
     private let launch = ContinuousClock.now
 
-    /// Registra `Ctrl+Option+D`. Devuelve `false` si Carbon rechaza el atajo, que es lo
+    /// Registra `Ctrl+Shift+D`. Devuelve `false` si Carbon rechaza el atajo, que es lo
     /// que pasa cuando otra aplicación ya lo tiene cogido.
     @discardableResult
     func registerHotKey() -> Bool {
         hotKey = GlobalHotKey(
             keyCode: UInt32(kVK_ANSI_D),
-            modifiers: UInt32(controlKey | optionKey)
+            modifiers: UInt32(controlKey | shiftKey)
         ) { [weak self] in
             self?.toggle()
         }

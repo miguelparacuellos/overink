@@ -15,7 +15,7 @@ puedo dibujar directamente sobre la aplicación que estoy usando.
 
 ## Solution
 
-Overink es una capa de anotación que vive en la barra de menús. Pulso `Ctrl+Option+D` y un
+Overink es una capa de anotación que vive en la barra de menús. Pulso `Ctrl+Shift+D` y un
 Overlay transparente se monta sobre la pantalla donde tengo el cursor: a partir de ahí, el
 lápiz dibuja encima de lo que hubiera, sea Chrome, el editor o el terminal. Vuelvo a pulsar y
 el Overlay se oculta, dejando la aplicación de debajo exactamente como estaba y conservando lo
@@ -150,7 +150,7 @@ aplica y repinta según el estado resultante.
 
 | Contexto | Tecla | Acción |
 | --- | --- | --- |
-| Global | `Ctrl+Option+D` | Armed ⇄ Dismissed |
+| Global | `Ctrl+Shift+D` | Armed ⇄ Dismissed |
 | Armed | `P` `H` `E` `T` `L` | Pen · Highlighter · Eraser · Text · Laser |
 | Armed | `1` `2` `3` `4` | Color de la Palette |
 | Armed | `Cmd+Z` / `Cmd+Shift+Z` | Undo / Redo |
