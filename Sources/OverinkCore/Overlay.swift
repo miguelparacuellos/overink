@@ -5,6 +5,11 @@ public struct Overlay: Sendable {
     public private(set) var state: OverlayState
     private var contentsByStage: [StageID: StageContent] = [:]
     private var strokeInProgress: [Point] = []
+    private var strokeWidth = Stroke.penWidth
+    private var strokeColor = PaletteColor.one
+    private var strokeOpacity = 1.0
+    private var selectedTool = Tool.pen
+    private var selectedColor = PaletteColor.one
     private var eraserPoint: Point?
 
     public init() {
@@ -25,7 +30,9 @@ public struct Overlay: Sendable {
                 state = .armed(
                     stage: stageUnderCursor,
                     canvas: contentsByStage[stageUnderCursor]?.canvas ?? Canvas(),
-                    liveStroke: liveStroke
+                    liveStroke: liveStroke,
+                    tool: selectedTool,
+                    color: selectedColor
                 )
             case .armed:
                 cancelLiveStroke()
@@ -35,62 +42,49 @@ public struct Overlay: Sendable {
             cancelLiveStroke()
             state = .dismissed
         case .penDown(let point):
-            guard case .armed(let stage, _, _) = state else { return }
-
-            // Empezar un gesto nuevo cierra el anterior para que una entrada incompleta
-            // nunca tape el trazo que el usuario ya ha terminado.
-            finishStroke()
-            eraserPoint = nil
-            strokeInProgress = [point]
-            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+            beginPointer(at: point)
         case .penMoved(let point):
-            guard case .armed(let stage, _, _) = state, !strokeInProgress.isEmpty else { return }
-
-            strokeInProgress.append(point)
-            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+            movePointer(to: point)
         case .penUp:
-            guard case .armed(let stage, _, _) = state else { return }
-
-            finishStroke()
-            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+            endPointer()
         case .eraserDown(let point):
-            guard case .armed(let stage, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _) = state else { return }
 
             cancelLiveStroke()
             eraseMarks(touchedBy: point, and: point)
             eraserPoint = point
-            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+            state = armedState(on: stage)
         case .eraserMoved(let point):
-            guard case .armed(let stage, _, _) = state, let previousPoint = eraserPoint else { return }
+            guard case .armed(let stage, _, _, _, _) = state, let previousPoint = eraserPoint else { return }
 
             eraseMarks(touchedBy: previousPoint, and: point)
             eraserPoint = point
-            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+            state = armedState(on: stage)
         case .eraserUp:
-            guard case .armed(let stage, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _) = state else { return }
 
             eraserPoint = nil
-            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+            state = armedState(on: stage)
         case .deleteMark(let index):
-            guard case .armed(let stage, _, _) = state, canvas.marks.indices.contains(index) else { return }
+            guard case .armed(let stage, _, _, _, _) = state, canvas.marks.indices.contains(index) else { return }
 
             cancelLiveStroke()
             let operation = CanvasOperation.remove(canvas.marks[index], at: index)
             applyAndRecord(operation)
-            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+            state = armedState(on: stage)
         case .clear:
-            guard case .armed(let stage, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _) = state else { return }
 
             cancelLiveStroke()
             guard !canvas.marks.isEmpty else {
-                state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+                state = armedState(on: stage)
                 return
             }
             let operation = CanvasOperation.clear(canvas.marks)
             applyAndRecord(operation)
-            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+            state = armedState(on: stage)
         case .undo:
-            guard case .armed(let stage, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _) = state else { return }
 
             cancelLiveStroke()
             var updatedCanvas = canvas
@@ -98,9 +92,9 @@ public struct Overlay: Sendable {
             updatedHistory.undo(on: &updatedCanvas)
             canvas = updatedCanvas
             history = updatedHistory
-            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+            state = armedState(on: stage)
         case .redo:
-            guard case .armed(let stage, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _) = state else { return }
 
             cancelLiveStroke()
             var updatedCanvas = canvas
@@ -108,7 +102,18 @@ public struct Overlay: Sendable {
             updatedHistory.redo(on: &updatedCanvas)
             canvas = updatedCanvas
             history = updatedHistory
-            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+            state = armedState(on: stage)
+        case .selectTool(let tool):
+            guard case .armed(let stage, _, _, _, _) = state else { return }
+
+            cancelLiveStroke()
+            selectedTool = tool
+            state = armedState(on: stage)
+        case .selectColor(let color):
+            guard case .armed(let stage, _, _, _, _) = state else { return }
+
+            selectedColor = color
+            state = armedState(on: stage)
         case .stagesChanged(let availableStages):
             let disconnectedStages = Set(contentsByStage.keys).subtracting(availableStages)
             for stage in disconnectedStages {
@@ -152,13 +157,23 @@ public struct Overlay: Sendable {
     }
 
     private var liveStroke: Stroke? {
-        strokeInProgress.isEmpty ? nil : Stroke(points: strokeInProgress)
+        strokeInProgress.isEmpty ? nil : Stroke(
+            points: strokeInProgress,
+            width: strokeWidth,
+            color: strokeColor,
+            opacity: strokeOpacity
+        )
     }
 
     private mutating func finishStroke() {
         guard !strokeInProgress.isEmpty else { return }
 
-        let operation = CanvasOperation.add(.stroke(Stroke(points: strokeInProgress)))
+        let operation = CanvasOperation.add(.stroke(Stroke(
+            points: strokeInProgress,
+            width: strokeWidth,
+            color: strokeColor,
+            opacity: strokeOpacity
+        )))
         applyAndRecord(operation)
         strokeInProgress = []
     }
@@ -175,6 +190,62 @@ public struct Overlay: Sendable {
     private mutating func cancelLiveStroke() {
         strokeInProgress = []
         eraserPoint = nil
+    }
+
+    private func armedState(on stage: StageID) -> OverlayState {
+        .armed(
+            stage: stage,
+            canvas: canvas,
+            liveStroke: liveStroke,
+            tool: selectedTool,
+            color: selectedColor
+        )
+    }
+
+    private mutating func beginPointer(at point: Point) {
+        guard case .armed(let stage, _, _, _, _) = state else { return }
+
+        switch selectedTool {
+        case .pen, .highlighter:
+            finishStroke()
+            eraserPoint = nil
+            strokeInProgress = [point]
+            strokeWidth = selectedTool == .highlighter ? Stroke.highlighterWidth : Stroke.penWidth
+            strokeColor = selectedColor
+            strokeOpacity = selectedTool == .highlighter ? Stroke.highlighterOpacity : 1
+        case .eraser:
+            cancelLiveStroke()
+            eraseMarks(touchedBy: point, and: point)
+            eraserPoint = point
+        }
+        state = armedState(on: stage)
+    }
+
+    private mutating func movePointer(to point: Point) {
+        guard case .armed(let stage, _, _, _, _) = state else { return }
+
+        switch selectedTool {
+        case .pen, .highlighter:
+            guard !strokeInProgress.isEmpty else { return }
+            strokeInProgress.append(point)
+        case .eraser:
+            guard let previousPoint = eraserPoint else { return }
+            eraseMarks(touchedBy: previousPoint, and: point)
+            eraserPoint = point
+        }
+        state = armedState(on: stage)
+    }
+
+    private mutating func endPointer() {
+        guard case .armed(let stage, _, _, _, _) = state else { return }
+
+        switch selectedTool {
+        case .pen, .highlighter:
+            finishStroke()
+        case .eraser:
+            eraserPoint = nil
+        }
+        state = armedState(on: stage)
     }
 
     /// Cada Mark alcanzado se registra por separado: `Undo` revierte el último borrado,
@@ -203,11 +274,58 @@ private struct StageContent: Sendable {
 /// escribe un Label, llega con el Text tool.
 public enum OverlayState: Equatable, Sendable {
     case dismissed
-    case armed(stage: StageID, canvas: Canvas, liveStroke: Stroke?)
+    case armed(stage: StageID, canvas: Canvas, liveStroke: Stroke?, tool: Tool, color: PaletteColor)
 
     public var stage: StageID? {
-        guard case .armed(let stage, _, _) = self else { return nil }
+        guard case .armed(let stage, _, _, _, _) = self else { return nil }
         return stage
+    }
+
+    public var tool: Tool? {
+        guard case .armed(_, _, _, let tool, _) = self else { return nil }
+        return tool
+    }
+
+    public var color: PaletteColor? {
+        guard case .armed(_, _, _, _, let color) = self else { return nil }
+        return color
+    }
+}
+
+/// La acción que aplica el gesto del puntero. Solo una está seleccionada mientras Armed.
+public enum Tool: Equatable, Sendable {
+    case pen
+    case highlighter
+    case eraser
+}
+
+/// Los cuatro colores de la Palette. Sus componentes viven aquí, sin depender de AppKit,
+/// para que todos los Mark y futuros Label reciban el mismo color seleccionado.
+public enum PaletteColor: CaseIterable, Equatable, Sendable {
+    case one
+    case two
+    case three
+    case four
+
+    public var components: PaletteComponents {
+        switch self {
+        case .one: PaletteComponents(red: 1, green: 0.78, blue: 0.1)
+        case .two: PaletteComponents(red: 0.18, green: 0.82, blue: 0.42)
+        case .three: PaletteComponents(red: 0.15, green: 0.56, blue: 1)
+        case .four: PaletteComponents(red: 0.92, green: 0.23, blue: 0.32)
+        }
+    }
+}
+
+public struct PaletteComponents: Equatable, Sendable {
+    public let red: Double
+    public let green: Double
+    public let blue: Double
+
+    public init(red: Double, green: Double, blue: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
     }
 }
 
@@ -223,6 +341,10 @@ public enum Command: Equatable, Sendable {
     case penDown(at: Point)
     case penMoved(to: Point)
     case penUp
+    /// Un gesto del puntero se interpreta con la Tool activa, sin que la shell tenga que
+    /// tomar la decisión de dominio de qué Tool está seleccionada.
+    case selectTool(Tool)
+    case selectColor(PaletteColor)
     /// El Eraser no deja un trazo propio: al recorrer el gesto elimina cada Mark que toca.
     case eraserDown(at: Point)
     case eraserMoved(to: Point)
@@ -362,15 +484,26 @@ public enum Mark: Equatable, Sendable {
 /// y su grosor permanece fijo, incluso cuando la entrada procede de una tableta.
 public struct Stroke: Equatable, Sendable {
     public static let penWidth = 3.0
+    public static let highlighterWidth = 18.0
+    public static let highlighterOpacity = 0.35
     /// El radio de contacto hace que rozar un trazo no exija cruzar exactamente su eje.
     public static let eraserRadius = 8.0
 
     public let points: [Point]
     public let width: Double
+    public let color: PaletteColor
+    public let opacity: Double
 
-    public init(points: [Point], width: Double = Self.penWidth) {
+    public init(
+        points: [Point],
+        width: Double = Self.penWidth,
+        color: PaletteColor = .one,
+        opacity: Double = 1
+    ) {
         self.points = points
         self.width = width
+        self.color = color
+        self.opacity = opacity
     }
 
     fileprivate func isTouched(byEraserSegmentFrom start: Point, to end: Point) -> Bool {

@@ -62,7 +62,7 @@ final class OverlayController {
     /// fuente.
     private func syncWindow() {
         switch overlay.state {
-        case .armed(let stage, let canvas, let liveStroke):
+        case .armed(let stage, let canvas, let liveStroke, _, _):
             watchdog.start()
             show(on: stage, canvas: canvas, liveStroke: liveStroke)
         case .dismissed:
@@ -130,6 +130,14 @@ final class OverlayController {
             apply(event.modifierFlags.contains(.shift) ? .redo : .undo)
         } else if event.keyCode == UInt16(kVK_Delete) {
             apply(.clear)
+        } else if event.keyCode == UInt16(kVK_ANSI_P) {
+            apply(.selectTool(.pen))
+        } else if event.keyCode == UInt16(kVK_ANSI_H) {
+            apply(.selectTool(.highlighter))
+        } else if event.keyCode == UInt16(kVK_ANSI_E) {
+            apply(.selectTool(.eraser))
+        } else if let color = paletteColor(for: event.keyCode) {
+            apply(.selectColor(color))
         }
         // Las demás teclas se las traga el Overlay sin hacer nada todavía: en Armed la
         // aplicación de debajo no recibe entrada (ADR-0002).
@@ -138,6 +146,16 @@ final class OverlayController {
         // del sistema se lleva el foco —y ADR-0005 exige que pueda—, vuelve en cuanto se
         // hace clic en el Overlay, que cubre la pantalla entera. La salida que no depende
         // del foco es el atajo global, que va por Carbon y no por la ventana.
+    }
+
+    private func paletteColor(for keyCode: UInt16) -> PaletteColor? {
+        switch keyCode {
+        case UInt16(kVK_ANSI_1): .one
+        case UInt16(kVK_ANSI_2): .two
+        case UInt16(kVK_ANSI_3): .three
+        case UInt16(kVK_ANSI_4): .four
+        default: nil
+        }
     }
 
     /// macOS publica esta notificación cuando se conecta o desconecta una pantalla. La

@@ -95,6 +95,67 @@ func unGestoDelPenDejaUnStrokeVisible() {
     #expect(overlay.state.finishedMarkCount == 1)
 }
 
+@Test("P, H y E cambian la Tool activa")
+func lasTeclasDeToolCambianLaToolActiva() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.highlighter), at: arranque)
+    #expect(overlay.state.tool == .highlighter)
+    overlay.apply(.selectTool(.eraser), at: arranque)
+    #expect(overlay.state.tool == .eraser)
+    overlay.apply(.selectTool(.pen), at: arranque)
+
+    #expect(overlay.state.tool == .pen)
+}
+
+@Test("El color seleccionado recibe los Strokes nuevos")
+func elColorActivoLlegaAlStrokeNuevo() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    for color in PaletteColor.allCases {
+        overlay.apply(.selectColor(color), at: arranque)
+        #expect(overlay.state.color == color)
+    }
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 20))
+
+    #expect(overlay.state.color == .four)
+    #expect(overlay.state.finishedMarks == [.stroke(Stroke(points: [Point(x: 10, y: 20)], color: .four))])
+}
+
+@Test("El Highlighter crea un Stroke translúcido y más ancho que el Pen")
+func elHighlighterCreaUnStrokeTranslucidoYAncho() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.highlighter), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 20))
+
+    guard case .stroke(let stroke) = overlay.state.finishedMarks[0] else {
+        Issue.record("El Mark nuevo debería ser un Stroke")
+        return
+    }
+    #expect(stroke.width > Stroke.penWidth)
+    #expect(stroke.opacity < 1)
+}
+
+@Test("El color activo también llega al Highlighter")
+func elColorActivoLlegaAlHighlighterNuevo() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectColor(.two), at: arranque)
+    overlay.apply(.selectTool(.highlighter), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 20))
+
+    guard case .stroke(let stroke) = overlay.state.finishedMarks[0] else {
+        Issue.record("El Mark nuevo debería ser un Stroke")
+        return
+    }
+    #expect(stroke.color == .two)
+}
+
 @Test("Los Strokes reaparecen al volver a armar el Overlay")
 func losStrokesReaparecenAlVolverAArmarElOverlay() {
     var overlay = Overlay()
@@ -309,12 +370,12 @@ private func borra(en overlay: inout Overlay, desde inicio: Point, hasta fin: Po
 
 private extension OverlayState {
     var finishedMarkCount: Int {
-        guard case .armed(_, let canvas, _) = self else { return 0 }
+        guard case .armed(_, let canvas, _, _, _) = self else { return 0 }
         return canvas.marks.count
     }
 
     var finishedMarks: [Mark] {
-        guard case .armed(_, let canvas, _) = self else { return [] }
+        guard case .armed(_, let canvas, _, _, _) = self else { return [] }
         return canvas.marks
     }
 }

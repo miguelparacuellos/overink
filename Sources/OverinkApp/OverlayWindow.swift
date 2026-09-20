@@ -45,7 +45,7 @@ final class OverlayWindow: NSWindow {
 }
 
 /// La vista que ocupa el Overlay. Traduce la entrada a comandos y pinta el Canvas que el core
-/// expone; la selección de Tool y el HUD llegarán con sus tickets.
+/// expone; la selección de Tool vive en el core y el HUD llegará con su ticket.
 final class OverlayView: NSView {
     /// Qué hacer con una tecla. La vista no decide nada: traduce y avisa.
     var onKeyDown: ((NSEvent) -> Void)?
@@ -82,12 +82,19 @@ final class OverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        NSColor.systemRed.setStroke()
         let finishedStrokes = canvas.marks.compactMap { mark -> Stroke? in
             guard case .stroke(let stroke) = mark else { return nil }
             return stroke
         }
         for stroke in finishedStrokes + [liveStroke].compactMap({ $0 }) {
+            let color = NSColor(
+                red: stroke.color.components.red,
+                green: stroke.color.components.green,
+                blue: stroke.color.components.blue,
+                alpha: stroke.opacity
+            )
+            color.setStroke()
+            color.setFill()
             let path = NSBezierPath()
             guard let first = stroke.points.first else { continue }
 
@@ -99,6 +106,16 @@ final class OverlayView: NSView {
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
 
+            let graphicsContext = NSGraphicsContext.current?.cgContext
+            if stroke.opacity < 1 {
+                // El path se pinta primero en una capa transparente con `.copy`: sus
+                // auto-cruces reemplazan el alpha de la capa en vez de acumularlo. Al
+                // cerrar la capa, Core Graphics la compone normalmente sobre los Marks
+                // que ya existían, sin borrar ni reemplazar los de otros Strokes.
+                graphicsContext?.saveGState()
+                graphicsContext?.beginTransparencyLayer(auxiliaryInfo: nil)
+                graphicsContext?.setBlendMode(.copy)
+            }
             if stroke.points.count == 1 {
                 NSBezierPath(ovalIn: NSRect(
                     x: first.x - stroke.width / 2,
@@ -108,6 +125,10 @@ final class OverlayView: NSView {
                 )).fill()
             } else {
                 path.stroke()
+            }
+            if stroke.opacity < 1 {
+                graphicsContext?.endTransparencyLayer()
+                graphicsContext?.restoreGState()
             }
         }
     }
