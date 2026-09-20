@@ -11,6 +11,7 @@ final class OverlayController {
     private var overlay = Overlay()
     private var window: OverlayWindow?
     private var hotKey: GlobalHotKey?
+    private let watchdog = MainThreadWatchdog()
 
     /// El core recibe el instante en cada comando y nunca lee el reloj. Aquí se usa un
     /// reloj monótono: el Auto-Dismiss no debe descolocarse porque cambie la hora.
@@ -49,8 +50,10 @@ final class OverlayController {
     private func syncWindow() {
         switch overlay.state {
         case .armed(let stage, let canvas, let liveStroke):
+            watchdog.start()
             show(on: stage, canvas: canvas, liveStroke: liveStroke)
         case .dismissed:
+            watchdog.stop()
             hide()
         }
     }

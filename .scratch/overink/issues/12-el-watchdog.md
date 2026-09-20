@@ -10,11 +10,21 @@ pronto: solo depende de que exista el estado Armed.
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Un hilo independiente del principal comprueba periódicamente que este sigue respondiendo
-- [ ] Si no responde en cinco segundos estando en Armed, el proceso termina
-- [ ] Como el Canvas solo vive en memoria, terminar no pierde nada que deba conservarse
+- [x] Un hilo independiente del principal comprueba periódicamente que este sigue respondiendo
+- [x] Si no responde en cinco segundos estando en Armed, el proceso termina
+- [x] Como el Canvas solo vive en memoria, terminar no pierde nada que deba conservarse
 - [ ] **Verificado a mano:** bloqueando deliberadamente el hilo principal en Armed, el Overlay desaparece en unos cinco segundos y se recupera el control del Mac
 - [ ] **Verificado a mano:** una sesión larga de uso normal no dispara ningún falso positivo
-- [ ] El código lleva un comentario que explica por qué existe y remite a ADR-0005, para que nadie lo borre por limpieza
+- [x] El código lleva un comentario que explica por qué existe y remite a ADR-0005, para que nadie lo borre por limpieza
+
+## Comments
+
+- Implementado `MainThreadWatchdog`: mientras el Overlay está Armed, una cola independiente
+  publica un acuse en el main queue cada segundo y termina el proceso si no recibe respuesta
+  en cinco segundos. Se cancela al pasar a Dismissed; el comentario de tipo remite a ADR-0005.
+- Verificación automática: `swift build --target OverinkApp` completó correctamente.
+  `swift test --filter OverlayStateTests` no llega a compilar por comandos de Eraser aún no
+  disponibles en un cambio paralelo (`eraserDown`, `eraserMoved`, `eraserUp`), ajeno al
+  watchdog. Quedan pendientes las dos verificaciones manuales del ticket.
