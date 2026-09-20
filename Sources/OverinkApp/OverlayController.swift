@@ -110,6 +110,10 @@ final class OverlayController {
         // Esc nunca es inerte (regla 3 de ADR-0005): desde Armed pasa a Dismissed.
         if event.keyCode == UInt16(kVK_Escape) {
             apply(.dismiss)
+        } else if event.keyCode == UInt16(kVK_ANSI_Z), event.modifierFlags.contains(.command) {
+            apply(event.modifierFlags.contains(.shift) ? .redo : .undo)
+        } else if event.keyCode == UInt16(kVK_Delete) {
+            apply(.clear)
         }
         // Las demás teclas se las traga el Overlay sin hacer nada todavía: en Armed la
         // aplicación de debajo no recibe entrada (ADR-0002).

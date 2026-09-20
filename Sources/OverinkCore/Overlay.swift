@@ -5,6 +5,7 @@ public struct Overlay: Sendable {
     public private(set) var state: OverlayState
     private var canvas = Canvas()
     private var strokeInProgress: [Point] = []
+    private var history = History()
 
     public init() {
         state = .dismissed
@@ -47,6 +48,38 @@ public struct Overlay: Sendable {
 
             finishStroke()
             state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+        case .deleteMark(let index):
+            guard case .armed(let stage, _, _) = state, canvas.marks.indices.contains(index) else { return }
+
+            cancelLiveStroke()
+            let operation = CanvasOperation.remove(canvas.marks[index], at: index)
+            operation.apply(to: &canvas)
+            history.record(operation)
+            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+        case .clear:
+            guard case .armed(let stage, _, _) = state else { return }
+
+            cancelLiveStroke()
+            guard !canvas.marks.isEmpty else {
+                state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+                return
+            }
+            let operation = CanvasOperation.clear(canvas.marks)
+            operation.apply(to: &canvas)
+            history.record(operation)
+            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+        case .undo:
+            guard case .armed(let stage, _, _) = state else { return }
+
+            cancelLiveStroke()
+            history.undo(on: &canvas)
+            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+        case .redo:
+            guard case .armed(let stage, _, _) = state else { return }
+
+            cancelLiveStroke()
+            history.redo(on: &canvas)
+            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
         }
     }
 
@@ -57,7 +90,9 @@ public struct Overlay: Sendable {
     private mutating func finishStroke() {
         guard !strokeInProgress.isEmpty else { return }
 
-        canvas.append(.stroke(Stroke(points: strokeInProgress)))
+        let operation = CanvasOperation.add(.stroke(Stroke(points: strokeInProgress)))
+        operation.apply(to: &canvas)
+        history.record(operation)
         strokeInProgress = []
     }
 
@@ -90,6 +125,14 @@ public enum Command: Equatable, Sendable {
     case penDown(at: Point)
     case penMoved(to: Point)
     case penUp
+    /// Borra un Mark terminado. El Eraser determinará qué índice toca y emitirá esta
+    /// intención; History registra el borrado como cualquier otra operación del Canvas.
+    case deleteMark(at: Int)
+    /// Vacía el Canvas entero. Como toda operación sobre el Canvas, se puede deshacer.
+    case clear
+    /// Revierte o reaplica la última operación del History.
+    case undo
+    case redo
 }
 
 /// Una coordenada de la superficie del Overlay, independiente de AppKit.
@@ -114,6 +157,86 @@ public struct Canvas: Equatable, Sendable {
 
     mutating func append(_ mark: Mark) {
         marks.append(mark)
+    }
+
+    mutating func insert(_ mark: Mark, at index: Int) {
+        marks.insert(mark, at: index)
+    }
+
+    mutating func removeLastMark() {
+        marks.removeLast()
+    }
+
+    mutating func removeMark(at index: Int) {
+        marks.remove(at: index)
+    }
+
+    mutating func removeAllMarks() {
+        marks.removeAll()
+    }
+
+    mutating func replaceMarks(with marks: [Mark]) {
+        self.marks = marks
+    }
+}
+
+/// Una modificación reversible del Canvas. El payload pertenece a la operación para que
+/// History nunca tenga que almacenar snapshots de Marks como si fueran el historial.
+private enum CanvasOperation: Sendable {
+    case add(Mark)
+    case remove(Mark, at: Int)
+    case clear([Mark])
+
+    func apply(to canvas: inout Canvas) {
+        switch self {
+        case .add(let mark):
+            canvas.append(mark)
+        case .remove(_, let index):
+            canvas.removeMark(at: index)
+        case .clear:
+            canvas.removeAllMarks()
+        }
+    }
+
+    func revert(on canvas: inout Canvas) {
+        switch self {
+        case .add:
+            canvas.removeLastMark()
+        case .remove(let mark, let index):
+            canvas.insert(mark, at: index)
+        case .clear(let marks):
+            canvas.replaceMarks(with: marks)
+        }
+    }
+}
+
+/// El historial reversible del Canvas. Conserva operaciones, con su información para
+/// revertirse, y limita ambas pilas a las cien operaciones aplicadas más recientes.
+private struct History: Sendable {
+    private static let capacity = 100
+    private var undoStack: [CanvasOperation] = []
+    private var redoStack: [CanvasOperation] = []
+
+    mutating func record(_ operation: CanvasOperation) {
+        undoStack.append(operation)
+        if undoStack.count > Self.capacity {
+            undoStack.removeFirst()
+        }
+        redoStack.removeAll()
+    }
+
+    mutating func undo(on canvas: inout Canvas) {
+        guard let operation = undoStack.popLast() else { return }
+
+        operation.revert(on: &canvas)
+        redoStack.append(operation)
+    }
+
+    mutating func redo(on canvas: inout Canvas) {
+        guard let operation = redoStack.popLast() else { return }
+
+        operation.apply(to: &canvas)
+        undoStack.append(operation)
     }
 }
 

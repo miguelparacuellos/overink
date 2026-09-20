@@ -122,9 +122,80 @@ func descartarDuranteUnGestoNoTerminaElStroke() {
     #expect(overlay.state.finishedMarkCount == 0)
 }
 
+@Test("Undo después de Clear devuelve todos los Marks")
+func undoDespuesDeClearDevuelveTodosLosMarks() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 20))
+    dibujaUnStroke(en: &overlay, desde: Point(x: 30, y: 40))
+    overlay.apply(.clear, at: arranque)
+    overlay.apply(.undo, at: arranque)
+
+    #expect(overlay.state.finishedMarkCount == 2)
+}
+
+@Test("Undo devuelve un Mark borrado")
+func undoDevuelveUnMarkBorrado() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 20))
+    dibujaUnStroke(en: &overlay, desde: Point(x: 30, y: 40))
+    let marksAntesDeBorrar = overlay.state.finishedMarks
+    overlay.apply(.deleteMark(at: 0), at: arranque)
+    overlay.apply(.undo, at: arranque)
+
+    #expect(overlay.state.finishedMarks == marksAntesDeBorrar)
+}
+
+@Test("La operación más antigua deja de ser reversible al superar cien")
+func laOperacionMasAntiguaDejaDeSerReversibleAlSuperarCien() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    for index in 0...100 {
+        dibujaUnStroke(en: &overlay, desde: Point(x: Double(index), y: 0))
+    }
+    for _ in 0..<101 {
+        overlay.apply(.undo, at: arranque)
+    }
+
+    #expect(overlay.state.finishedMarkCount == 1)
+}
+
+@Test("Undo y Redo restauran la misma secuencia de operaciones")
+func undoYRedoRestauranLaMismaSecuenciaDeOperaciones() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 20))
+    dibujaUnStroke(en: &overlay, desde: Point(x: 30, y: 40))
+    let marksAntesDeClear = overlay.state.finishedMarks
+    overlay.apply(.clear, at: arranque)
+    overlay.apply(.undo, at: arranque)
+    overlay.apply(.undo, at: arranque)
+    #expect(overlay.state.finishedMarks == [marksAntesDeClear[0]])
+    overlay.apply(.redo, at: arranque)
+    #expect(overlay.state.finishedMarks == marksAntesDeClear)
+    overlay.apply(.redo, at: arranque)
+
+    #expect(overlay.state.finishedMarks.isEmpty)
+}
+
+private func dibujaUnStroke(en overlay: inout Overlay, desde point: Point) {
+    overlay.apply(.penDown(at: point), at: arranque)
+    overlay.apply(.penUp, at: arranque)
+}
+
 private extension OverlayState {
     var finishedMarkCount: Int {
         guard case .armed(_, let canvas, _) = self else { return 0 }
         return canvas.marks.count
+    }
+
+    var finishedMarks: [Mark] {
+        guard case .armed(_, let canvas, _) = self else { return [] }
+        return canvas.marks
     }
 }
