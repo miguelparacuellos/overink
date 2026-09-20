@@ -5,6 +5,7 @@ public struct Overlay: Sendable {
     public private(set) var state: OverlayState
     private var canvas = Canvas()
     private var strokeInProgress: [Point] = []
+    private var eraserPoint: Point?
     private var history = History()
 
     public init() {
@@ -36,6 +37,7 @@ public struct Overlay: Sendable {
             // Empezar un gesto nuevo cierra el anterior para que una entrada incompleta
             // nunca tape el trazo que el usuario ya ha terminado.
             finishStroke()
+            eraserPoint = nil
             strokeInProgress = [point]
             state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
         case .penMoved(let point):
@@ -47,6 +49,24 @@ public struct Overlay: Sendable {
             guard case .armed(let stage, _, _) = state else { return }
 
             finishStroke()
+            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+        case .eraserDown(let point):
+            guard case .armed(let stage, _, _) = state else { return }
+
+            cancelLiveStroke()
+            eraseMarks(touchedBy: point, and: point)
+            eraserPoint = point
+            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+        case .eraserMoved(let point):
+            guard case .armed(let stage, _, _) = state, let previousPoint = eraserPoint else { return }
+
+            eraseMarks(touchedBy: previousPoint, and: point)
+            eraserPoint = point
+            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+        case .eraserUp:
+            guard case .armed(let stage, _, _) = state else { return }
+
+            eraserPoint = nil
             state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
         case .deleteMark(let index):
             guard case .armed(let stage, _, _) = state, canvas.marks.indices.contains(index) else { return }
@@ -98,6 +118,22 @@ public struct Overlay: Sendable {
 
     private mutating func cancelLiveStroke() {
         strokeInProgress = []
+        eraserPoint = nil
+    }
+
+    /// Cada Mark alcanzado se registra por separado: `Undo` revierte el último borrado,
+    /// igual que revierte el último Mark añadido o un Clear.
+    private mutating func eraseMarks(touchedBy start: Point, and end: Point) {
+        let touchedIndices = canvas.marks.indices.filter {
+            canvas.marks[$0].isTouched(byEraserSegmentFrom: start, to: end)
+        }
+
+        // De atrás hacia delante los índices de los Marks aún no borrados no cambian.
+        for index in touchedIndices.reversed() {
+            let operation = CanvasOperation.remove(canvas.marks[index], at: index)
+            operation.apply(to: &canvas)
+            history.record(operation)
+        }
     }
 }
 
@@ -125,8 +161,12 @@ public enum Command: Equatable, Sendable {
     case penDown(at: Point)
     case penMoved(to: Point)
     case penUp
-    /// Borra un Mark terminado. El Eraser determinará qué índice toca y emitirá esta
-    /// intención; History registra el borrado como cualquier otra operación del Canvas.
+    /// El Eraser no deja un trazo propio: al recorrer el gesto elimina cada Mark que toca.
+    case eraserDown(at: Point)
+    case eraserMoved(to: Point)
+    case eraserUp
+    /// Borra un Mark terminado por índice. El Eraser usa sus propios comandos de gesto;
+    /// History registra ambos borrados como operaciones del Canvas.
     case deleteMark(at: Int)
     /// Vacía el Canvas entero. Como toda operación sobre el Canvas, se puede deshacer.
     case clear
@@ -244,12 +284,21 @@ private struct History: Sendable {
 /// llegará con el Text tool sin cambiar la costura que lee la shell.
 public enum Mark: Equatable, Sendable {
     case stroke(Stroke)
+
+    fileprivate func isTouched(byEraserSegmentFrom start: Point, to end: Point) -> Bool {
+        switch self {
+        case .stroke(let stroke):
+            stroke.isTouched(byEraserSegmentFrom: start, to: end)
+        }
+    }
 }
 
 /// Un Mark vectorial creado con el Pen. Sus puntos no dependen de ningún framework de UI
 /// y su grosor permanece fijo, incluso cuando la entrada procede de una tableta.
 public struct Stroke: Equatable, Sendable {
     public static let penWidth = 3.0
+    /// El radio de contacto hace que rozar un trazo no exija cruzar exactamente su eje.
+    public static let eraserRadius = 8.0
 
     public let points: [Point]
     public let width: Double
@@ -258,6 +307,66 @@ public struct Stroke: Equatable, Sendable {
         self.points = points
         self.width = width
     }
+
+    fileprivate func isTouched(byEraserSegmentFrom start: Point, to end: Point) -> Bool {
+        guard let firstPoint = points.first else { return false }
+
+        let contactDistanceSquared = pow2(Self.eraserRadius + width / 2)
+        if points.count == 1 {
+            return squaredDistance(from: firstPoint, to: start, end) <= contactDistanceSquared
+        }
+
+        return zip(points, points.dropFirst()).contains { strokeStart, strokeEnd in
+            segmentsIntersect(start, end, strokeStart, strokeEnd)
+                || squaredDistance(from: start, to: strokeStart, strokeEnd) <= contactDistanceSquared
+                || squaredDistance(from: end, to: strokeStart, strokeEnd) <= contactDistanceSquared
+                || squaredDistance(from: strokeStart, to: start, end) <= contactDistanceSquared
+                || squaredDistance(from: strokeEnd, to: start, end) <= contactDistanceSquared
+        }
+    }
+}
+
+private func pow2(_ value: Double) -> Double { value * value }
+
+private func squaredDistance(from point: Point, to segmentStart: Point, _ segmentEnd: Point) -> Double {
+    let dx = segmentEnd.x - segmentStart.x
+    let dy = segmentEnd.y - segmentStart.y
+    let segmentLengthSquared = pow2(dx) + pow2(dy)
+    guard segmentLengthSquared > 0 else {
+        return pow2(point.x - segmentStart.x) + pow2(point.y - segmentStart.y)
+    }
+
+    let projection = ((point.x - segmentStart.x) * dx + (point.y - segmentStart.y) * dy) / segmentLengthSquared
+    let clampedProjection = min(1, max(0, projection))
+    let closestX = segmentStart.x + clampedProjection * dx
+    let closestY = segmentStart.y + clampedProjection * dy
+    return pow2(point.x - closestX) + pow2(point.y - closestY)
+}
+
+private func segmentsIntersect(_ firstStart: Point, _ firstEnd: Point, _ secondStart: Point, _ secondEnd: Point) -> Bool {
+    let firstOrientationAtSecondStart = orientation(firstStart, firstEnd, secondStart)
+    let firstOrientationAtSecondEnd = orientation(firstStart, firstEnd, secondEnd)
+    let secondOrientationAtFirstStart = orientation(secondStart, secondEnd, firstStart)
+    let secondOrientationAtFirstEnd = orientation(secondStart, secondEnd, firstEnd)
+
+    if firstOrientationAtSecondStart == 0, isOnSegment(secondStart, from: firstStart, to: firstEnd) { return true }
+    if firstOrientationAtSecondEnd == 0, isOnSegment(secondEnd, from: firstStart, to: firstEnd) { return true }
+    if secondOrientationAtFirstStart == 0, isOnSegment(firstStart, from: secondStart, to: secondEnd) { return true }
+    if secondOrientationAtFirstEnd == 0, isOnSegment(firstEnd, from: secondStart, to: secondEnd) { return true }
+
+    return (firstOrientationAtSecondStart > 0) != (firstOrientationAtSecondEnd > 0)
+        && (secondOrientationAtFirstStart > 0) != (secondOrientationAtFirstEnd > 0)
+}
+
+private func orientation(_ start: Point, _ end: Point, _ point: Point) -> Double {
+    (end.x - start.x) * (point.y - start.y) - (end.y - start.y) * (point.x - start.x)
+}
+
+private func isOnSegment(_ point: Point, from segmentStart: Point, to segmentEnd: Point) -> Bool {
+    point.x >= min(segmentStart.x, segmentEnd.x)
+        && point.x <= max(segmentStart.x, segmentEnd.x)
+        && point.y >= min(segmentStart.y, segmentEnd.y)
+        && point.y <= max(segmentStart.y, segmentEnd.y)
 }
 
 /// Identifica una pantalla sin que el core sepa nada de pantallas. La shell la deriva

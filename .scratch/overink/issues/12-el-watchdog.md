@@ -28,3 +28,6 @@ pronto: solo depende de que exista el estado Armed.
   `swift test --filter OverlayStateTests` no llega a compilar por comandos de Eraser aún no
   disponibles en un cambio paralelo (`eraserDown`, `eraserMoved`, `eraserUp`), ajeno al
   watchdog. Quedan pendientes las dos verificaciones manuales del ticket.
+- Verificación final: tras integrarse el cambio paralelo de Eraser, `swift test` completó
+  correctamente los 18 tests. La revisión del cambio detectó y se corrigió una carrera entre
+  un tick del watchdog y su cancelación al pasar a Dismissed.

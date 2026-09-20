@@ -45,13 +45,18 @@ final class MainThreadWatchdog: @unchecked Sendable {
         lock.lock()
         let unresponsiveFor = now - lastMainQueueResponse
         let isRunning = timer != nil
-        lock.unlock()
 
-        guard isRunning else { return }
+        guard isRunning else {
+            lock.unlock()
+            return
+        }
 
         if unresponsiveFor >= timeout {
+            // La decisión fatal y `stop()` se excluyen mutuamente: un tick que ya estaba
+            // en vuelo no puede terminar Overink después de pasar a Dismissed.
             exit(EXIT_FAILURE)
         }
+        lock.unlock()
 
         DispatchQueue.main.async { [weak self] in
             self?.recordMainQueueResponse()

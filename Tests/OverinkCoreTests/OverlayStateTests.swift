@@ -149,6 +149,57 @@ func undoDevuelveUnMarkBorrado() {
     #expect(overlay.state.finishedMarks == marksAntesDeBorrar)
 }
 
+@Test("El Eraser elimina entero el Stroke que roza")
+func elEraserEliminaEnteroElStrokeQueRoza() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 10), hasta: Point(x: 30, y: 10))
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 30), hasta: Point(x: 30, y: 30))
+
+    borra(en: &overlay, desde: Point(x: 20, y: 0), hasta: Point(x: 20, y: 20))
+
+    #expect(overlay.state.finishedMarks == [.stroke(Stroke(points: [
+        Point(x: 10, y: 30), Point(x: 30, y: 30),
+    ]))])
+}
+
+@Test("Un gesto del Eraser no crea ningún Mark")
+func unGestoDelEraserNoCreaNingunMark() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    borra(en: &overlay, desde: Point(x: 10, y: 10), hasta: Point(x: 30, y: 10))
+
+    #expect(overlay.state.finishedMarkCount == 0)
+}
+
+@Test("El Eraser elimina todos los Marks que roza en un gesto")
+func elEraserEliminaTodosLosMarksQueRozaEnUnGesto() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 10), hasta: Point(x: 30, y: 10))
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 30), hasta: Point(x: 30, y: 30))
+
+    borra(en: &overlay, desde: Point(x: 20, y: 0), hasta: Point(x: 20, y: 40))
+
+    #expect(overlay.state.finishedMarkCount == 0)
+}
+
+@Test("Undo devuelve entero el Mark eliminado por el Eraser")
+func undoDevuelveEnteroElMarkEliminadoPorElEraser() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    let stroke = Stroke(points: [Point(x: 10, y: 10), Point(x: 30, y: 10)])
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 10), hasta: Point(x: 30, y: 10))
+    borra(en: &overlay, desde: Point(x: 20, y: 0), hasta: Point(x: 20, y: 20))
+    overlay.apply(.undo, at: arranque)
+
+    #expect(overlay.state.finishedMarks == [.stroke(stroke)])
+}
+
 @Test("La operación más antigua deja de ser reversible al superar cien")
 func laOperacionMasAntiguaDejaDeSerReversibleAlSuperarCien() {
     var overlay = Overlay()
@@ -186,6 +237,18 @@ func undoYRedoRestauranLaMismaSecuenciaDeOperaciones() {
 private func dibujaUnStroke(en overlay: inout Overlay, desde point: Point) {
     overlay.apply(.penDown(at: point), at: arranque)
     overlay.apply(.penUp, at: arranque)
+}
+
+private func dibujaUnStroke(en overlay: inout Overlay, desde inicio: Point, hasta fin: Point) {
+    overlay.apply(.penDown(at: inicio), at: arranque)
+    overlay.apply(.penMoved(to: fin), at: arranque)
+    overlay.apply(.penUp, at: arranque)
+}
+
+private func borra(en overlay: inout Overlay, desde inicio: Point, hasta fin: Point) {
+    overlay.apply(.eraserDown(at: inicio), at: arranque)
+    overlay.apply(.eraserMoved(to: fin), at: arranque)
+    overlay.apply(.eraserUp, at: arranque)
 }
 
 private extension OverlayState {
