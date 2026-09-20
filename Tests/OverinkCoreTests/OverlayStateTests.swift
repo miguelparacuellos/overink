@@ -182,6 +182,70 @@ func tSeleccionaElTextTool() {
     #expect(overlay.state.tool == .text)
 }
 
+@Test("El Laser deja un rastro efímero sin añadir Marks ni operaciones al History")
+func elLaserNoEntraEnCanvasNiHistory() {
+    var overlay = Overlay()
+    let inicio = Point(x: 10, y: 20)
+    let fin = Point(x: 30, y: 40)
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 1, y: 2))
+    overlay.apply(.selectTool(.laser), at: arranque)
+    overlay.apply(.penDown(at: inicio), at: arranque)
+    overlay.apply(.penMoved(to: fin), at: Instant(sinceLaunch: .seconds(1)))
+    overlay.apply(.penUp, at: Instant(sinceLaunch: .seconds(1)))
+
+    #expect(overlay.state.tool == .laser)
+    #expect(overlay.state.finishedMarkCount == 1)
+    #expect(overlay.state.laserTrail?.points == [inicio, fin])
+
+    overlay.apply(.undo, at: Instant(sinceLaunch: .seconds(1)))
+    #expect(overlay.state.finishedMarks.isEmpty)
+}
+
+@Test("El rastro del Laser se desvanece por completo tras dos segundos")
+func elRastroDelLaserSeDesvanece() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.laser), at: arranque)
+    overlay.apply(.penDown(at: Point(x: 10, y: 20)), at: arranque)
+    overlay.apply(.timeTick, at: Instant(sinceLaunch: .seconds(1)))
+
+    #expect(overlay.state.laserTrail?.opacity == 0.5)
+    overlay.apply(.timeTick, at: Instant(sinceLaunch: .seconds(2)))
+    #expect(overlay.state.laserTrail == nil)
+}
+
+@Test("Un tic de tiempo que no vence el Auto-Dismiss conserva el Label en edición")
+func unTicDeTiempoConservaElLabelEnEdicion() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.text), at: arranque)
+    overlay.apply(.penDown(at: Point(x: 10, y: 20)), at: arranque)
+    overlay.apply(.typeText("Laser"), at: arranque)
+    overlay.apply(.timeTick, at: Instant(sinceLaunch: .seconds(1)))
+
+    #expect(overlay.state.editingLabel?.text == "Laser")
+}
+
+@Test("Clear y Dismissed no conservan ni afectan al rastro del Laser")
+func clearYDismissedNoAfectanAlLaser() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.laser), at: arranque)
+    overlay.apply(.penDown(at: Point(x: 10, y: 20)), at: arranque)
+    overlay.apply(.clear, at: arranque)
+
+    #expect(overlay.state.laserTrail != nil)
+    #expect(overlay.state.finishedMarks.isEmpty)
+    overlay.apply(.dismiss, at: arranque)
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    #expect(overlay.state.laserTrail == nil)
+}
+
 @Test("En Editing las teclas de atajo se añaden al Label")
 func enEditingLosAtajosSonTexto() {
     var overlay = Overlay()
@@ -503,12 +567,12 @@ private func borra(en overlay: inout Overlay, desde inicio: Point, hasta fin: Po
 
 private extension OverlayState {
     var finishedMarkCount: Int {
-        guard case .armed(_, let canvas, _, _, _) = self else { return 0 }
+        guard case .armed(_, let canvas, _, _, _, _) = self else { return 0 }
         return canvas.marks.count
     }
 
     var finishedMarks: [Mark] {
-        guard case .armed(_, let canvas, _, _, _) = self else { return [] }
+        guard case .armed(_, let canvas, _, _, _, _) = self else { return [] }
         return canvas.marks
     }
 }

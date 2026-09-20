@@ -58,6 +58,9 @@ final class OverlayView: NSView {
     var liveStroke: Stroke? {
         didSet { needsDisplay = true }
     }
+    var laserTrail: Stroke? {
+        didSet { needsDisplay = true }
+    }
     var editingLabel: Label? {
         didSet { needsDisplay = true }
     }
@@ -141,7 +144,7 @@ final class OverlayView: NSView {
             guard case .stroke(let stroke) = mark else { return nil }
             return stroke
         }
-        for stroke in finishedStrokes + [liveStroke].compactMap({ $0 }) {
+        for stroke in finishedStrokes + [liveStroke, laserTrail].compactMap({ $0 }) {
             let color = NSColor(
                 red: stroke.color.components.red,
                 green: stroke.color.components.green,
@@ -264,6 +267,7 @@ private extension Tool {
         case .highlighter: "Highlighter"
         case .eraser: "Eraser"
         case .text: "Text"
+        case .laser: "Laser"
         }
     }
 }

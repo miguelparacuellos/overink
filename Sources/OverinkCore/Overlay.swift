@@ -12,9 +12,14 @@ public struct Overlay: Sendable {
     private var selectedColor = PaletteColor.one
     private var eraserPoint: Point?
     private var labelInProgress: Label?
+    private var laserPoints: [Point] = []
+    private var laserColor = PaletteColor.one
+    private var laserOpacity = 1.0
+    private var laserLastUpdatedAt: Instant?
     private var lastInputAt: Instant?
 
     private static let autoDismissDelay = Duration.seconds(15 * 60)
+    private static let laserFadeDelay = Duration.seconds(2)
 
     public init() {
         state = .dismissed
@@ -23,6 +28,8 @@ public struct Overlay: Sendable {
     /// Aplica un comando en un instante dado. El instante se recibe siempre desde fuera:
     /// el core nunca lee el reloj, que es lo que mantiene determinista el Auto-Dismiss.
     public mutating func apply(_ command: Command, at instant: Instant) {
+        refreshLaserTrail(at: instant)
+
         if command.isInputEvent {
             recordInput(at: instant)
         }
@@ -38,61 +45,68 @@ public struct Overlay: Sendable {
                     stage: stageUnderCursor,
                     canvas: contentsByStage[stageUnderCursor]?.canvas ?? Canvas(),
                     liveStroke: liveStroke,
+                    laserTrail: laserTrail,
                     tool: selectedTool,
                     color: selectedColor
                 )
                 lastInputAt = instant
             case .armed:
                 cancelLiveStroke()
+                cancelLaserTrail()
                 state = .dismissed
                 lastInputAt = nil
             case .editing:
                 cancelLiveLabel()
+                cancelLaserTrail()
                 state = .dismissed
                 lastInputAt = nil
             }
         case .dismiss:
             cancelLiveStroke()
             cancelLiveLabel()
+            cancelLaserTrail()
             state = .dismissed
             lastInputAt = nil
         case .inputReceived:
             break
         case .timeTick:
             autoDismissIfNeeded(at: instant)
+            if case .armed(let stage, _, _, _, _, _) = state {
+                state = armedState(on: stage)
+            }
         case .penDown(let point):
-            beginPointer(at: point)
+            beginPointer(at: point, instant: instant)
         case .penMoved(let point):
-            movePointer(to: point)
+            movePointer(to: point, instant: instant)
         case .penUp:
             endPointer()
         case .eraserDown(let point):
-            guard case .armed(let stage, _, _, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _, _) = state else { return }
 
             cancelLiveStroke()
             eraseMarks(touchedBy: point, and: point)
             eraserPoint = point
             state = armedState(on: stage)
         case .eraserMoved(let point):
-            guard case .armed(let stage, _, _, _, _) = state, let previousPoint = eraserPoint else { return }
+            guard case .armed(let stage, _, _, _, _, _) = state, let previousPoint = eraserPoint else { return }
 
             eraseMarks(touchedBy: previousPoint, and: point)
             eraserPoint = point
             state = armedState(on: stage)
         case .eraserUp:
-            guard case .armed(let stage, _, _, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _, _) = state else { return }
 
             eraserPoint = nil
             state = armedState(on: stage)
         case .deleteMark(let index):
-            guard case .armed(let stage, _, _, _, _) = state, canvas.marks.indices.contains(index) else { return }
+            guard case .armed(let stage, _, _, _, _, _) = state, canvas.marks.indices.contains(index) else { return }
 
             cancelLiveStroke()
             let operation = CanvasOperation.remove(canvas.marks[index], at: index)
             applyAndRecord(operation)
             state = armedState(on: stage)
         case .clear:
-            guard case .armed(let stage, _, _, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _, _) = state else { return }
 
             cancelLiveStroke()
             guard !canvas.marks.isEmpty else {
@@ -103,7 +117,7 @@ public struct Overlay: Sendable {
             applyAndRecord(operation)
             state = armedState(on: stage)
         case .undo:
-            guard case .armed(let stage, _, _, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _, _) = state else { return }
 
             cancelLiveStroke()
             var updatedCanvas = canvas
@@ -113,7 +127,7 @@ public struct Overlay: Sendable {
             history = updatedHistory
             state = armedState(on: stage)
         case .redo:
-            guard case .armed(let stage, _, _, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _, _) = state else { return }
 
             cancelLiveStroke()
             var updatedCanvas = canvas
@@ -140,13 +154,13 @@ public struct Overlay: Sendable {
             cancelLiveLabel()
             state = armedState(on: stage)
         case .selectTool(let tool):
-            guard case .armed(let stage, _, _, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _, _) = state else { return }
 
             cancelLiveStroke()
             selectedTool = tool
             state = armedState(on: stage)
         case .selectColor(let color):
-            guard case .armed(let stage, _, _, _, _) = state else { return }
+            guard case .armed(let stage, _, _, _, _, _) = state else { return }
 
             selectedColor = color
             state = armedState(on: stage)
@@ -157,6 +171,7 @@ public struct Overlay: Sendable {
             }
             if let activeStage = state.stage, !availableStages.contains(activeStage) {
                 cancelLiveStroke()
+                cancelLaserTrail()
                 state = .dismissed
                 lastInputAt = nil
             }
@@ -221,6 +236,16 @@ public struct Overlay: Sendable {
         )
     }
 
+    private var laserTrail: Stroke? {
+        guard !laserPoints.isEmpty else { return nil }
+        return Stroke(
+            points: laserPoints,
+            width: Stroke.penWidth,
+            color: laserColor,
+            opacity: laserOpacity
+        )
+    }
+
     private mutating func finishStroke() {
         guard !strokeInProgress.isEmpty else { return }
 
@@ -248,6 +273,22 @@ public struct Overlay: Sendable {
         eraserPoint = nil
     }
 
+    private mutating func cancelLaserTrail() {
+        laserPoints = []
+        laserLastUpdatedAt = nil
+    }
+
+    private mutating func refreshLaserTrail(at instant: Instant) {
+        guard let laserLastUpdatedAt else { return }
+
+        let elapsed = instant.sinceLaunch - laserLastUpdatedAt.sinceLaunch
+        guard elapsed < Self.laserFadeDelay else {
+            cancelLaserTrail()
+            return
+        }
+        laserOpacity = 1 - (elapsed / Self.laserFadeDelay)
+    }
+
     private mutating func cancelLiveLabel() {
         labelInProgress = nil
     }
@@ -257,6 +298,7 @@ public struct Overlay: Sendable {
             stage: stage,
             canvas: canvas,
             liveStroke: liveStroke,
+            laserTrail: laserTrail,
             tool: selectedTool,
             color: selectedColor
         )
@@ -273,8 +315,8 @@ public struct Overlay: Sendable {
         )
     }
 
-    private mutating func beginPointer(at point: Point) {
-        guard case .armed(let stage, _, _, _, _) = state else { return }
+    private mutating func beginPointer(at point: Point, instant: Instant) {
+        guard case .armed(let stage, _, _, _, _, _) = state else { return }
 
         switch selectedTool {
         case .pen, .highlighter:
@@ -293,12 +335,18 @@ public struct Overlay: Sendable {
             labelInProgress = Label(anchor: point, text: "", color: selectedColor)
             state = editingState(on: stage)
             return
+        case .laser:
+            cancelLiveStroke()
+            laserPoints = [point]
+            laserColor = selectedColor
+            laserOpacity = 1
+            laserLastUpdatedAt = instant
         }
         state = armedState(on: stage)
     }
 
-    private mutating func movePointer(to point: Point) {
-        guard case .armed(let stage, _, _, _, _) = state else { return }
+    private mutating func movePointer(to point: Point, instant: Instant) {
+        guard case .armed(let stage, _, _, _, _, _) = state else { return }
 
         switch selectedTool {
         case .pen, .highlighter:
@@ -310,12 +358,17 @@ public struct Overlay: Sendable {
             eraserPoint = point
         case .text:
             return
+        case .laser:
+            guard !laserPoints.isEmpty else { return }
+            laserPoints.append(point)
+            laserOpacity = 1
+            laserLastUpdatedAt = instant
         }
         state = armedState(on: stage)
     }
 
     private mutating func endPointer() {
-        guard case .armed(let stage, _, _, _, _) = state else { return }
+        guard case .armed(let stage, _, _, _, _, _) = state else { return }
 
         switch selectedTool {
         case .pen, .highlighter:
@@ -324,6 +377,8 @@ public struct Overlay: Sendable {
             eraserPoint = nil
         case .text:
             return
+        case .laser:
+            break
         }
         state = armedState(on: stage)
     }
@@ -354,26 +409,26 @@ private struct StageContent: Sendable {
 /// escribe un Label, llega con el Text tool.
 public enum OverlayState: Equatable, Sendable {
     case dismissed
-    case armed(stage: StageID, canvas: Canvas, liveStroke: Stroke?, tool: Tool, color: PaletteColor)
+    case armed(stage: StageID, canvas: Canvas, liveStroke: Stroke?, laserTrail: Stroke?, tool: Tool, color: PaletteColor)
     case editing(stage: StageID, canvas: Canvas, label: Label, tool: Tool, color: PaletteColor)
 
     public var stage: StageID? {
         switch self {
-        case .armed(let stage, _, _, _, _), .editing(let stage, _, _, _, _): stage
+        case .armed(let stage, _, _, _, _, _), .editing(let stage, _, _, _, _): stage
         case .dismissed: nil
         }
     }
 
     public var tool: Tool? {
         switch self {
-        case .armed(_, _, _, let tool, _), .editing(_, _, _, let tool, _): tool
+        case .armed(_, _, _, _, let tool, _), .editing(_, _, _, let tool, _): tool
         case .dismissed: nil
         }
     }
 
     public var color: PaletteColor? {
         switch self {
-        case .armed(_, _, _, _, let color), .editing(_, _, _, _, let color): color
+        case .armed(_, _, _, _, _, let color), .editing(_, _, _, _, let color): color
         case .dismissed: nil
         }
     }
@@ -381,6 +436,11 @@ public enum OverlayState: Equatable, Sendable {
     public var editingLabel: Label? {
         guard case .editing(_, _, let label, _, _) = self else { return nil }
         return label
+    }
+
+    public var laserTrail: Stroke? {
+        guard case .armed(_, _, _, let laserTrail, _, _) = self else { return nil }
+        return laserTrail
     }
 }
 
@@ -390,6 +450,7 @@ public enum Tool: Equatable, Sendable {
     case highlighter
     case eraser
     case text
+    case laser
 }
 
 /// Los cuatro colores de la Palette. Sus componentes viven aquí, sin depender de AppKit,

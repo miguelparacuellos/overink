@@ -14,8 +14,10 @@ final class OverlayController {
     private var screenParametersObserver: NSObjectProtocol?
     private let watchdog = MainThreadWatchdog()
     private var autoDismissTimer: Timer?
+    private var laserFadeTimer: Timer?
 
     private static let autoDismissDelay: TimeInterval = 15 * 60
+    private static let laserFadeInterval: TimeInterval = 1 / 30
 
     /// El core recibe el instante en cada comando y nunca lee el reloj. Aquí se usa un
     /// reloj monótono: el Auto-Dismiss no debe descolocarse porque cambie la hora.
@@ -70,13 +72,15 @@ final class OverlayController {
     /// fuente.
     private func syncWindow() {
         switch overlay.state {
-        case .armed(let stage, let canvas, let liveStroke, let tool, let color):
+        case .armed(let stage, let canvas, let liveStroke, let laserTrail, let tool, let color):
             watchdog.start()
             startAutoDismissTimer()
+            laserTrail == nil ? stopLaserFadeTimer() : startLaserFadeTimer()
             show(
                 on: stage,
                 canvas: canvas,
                 liveStroke: liveStroke,
+                laserTrail: laserTrail,
                 editingLabel: nil,
                 activeTool: tool,
                 activeColor: color
@@ -84,10 +88,12 @@ final class OverlayController {
         case .editing(let stage, let canvas, let label, let tool, let color):
             watchdog.start()
             startAutoDismissTimer()
+            stopLaserFadeTimer()
             show(
                 on: stage,
                 canvas: canvas,
                 liveStroke: nil,
+                laserTrail: nil,
                 editingLabel: label,
                 activeTool: tool,
                 activeColor: color
@@ -95,6 +101,7 @@ final class OverlayController {
         case .dismissed:
             watchdog.stop()
             stopAutoDismissTimer()
+            stopLaserFadeTimer()
             hide()
         }
     }
@@ -123,10 +130,28 @@ final class OverlayController {
         autoDismissTimer = nil
     }
 
+    private func startLaserFadeTimer() {
+        guard laserFadeTimer == nil else { return }
+
+        let timer = Timer(timeInterval: Self.laserFadeInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.apply(.timeTick)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        laserFadeTimer = timer
+    }
+
+    private func stopLaserFadeTimer() {
+        laserFadeTimer?.invalidate()
+        laserFadeTimer = nil
+    }
+
     private func show(
         on stage: StageID,
         canvas: Canvas,
         liveStroke: Stroke?,
+        laserTrail: Stroke?,
         editingLabel: Label?,
         activeTool: Tool,
         activeColor: PaletteColor
@@ -135,6 +160,7 @@ final class OverlayController {
             let view = window.contentView as? OverlayView
             view?.canvas = canvas
             view?.liveStroke = liveStroke
+            view?.laserTrail = laserTrail
             view?.editingLabel = editingLabel
             view?.activeTool = activeTool
             view?.activeColor = activeColor
@@ -157,6 +183,7 @@ final class OverlayController {
         view.onInput = { [weak self] in self?.receivedInput() }
         view.canvas = canvas
         view.liveStroke = liveStroke
+        view.laserTrail = laserTrail
         view.editingLabel = editingLabel
         view.activeTool = activeTool
         view.activeColor = activeColor
@@ -215,6 +242,8 @@ final class OverlayController {
             apply(.selectTool(.eraser))
         } else if event.keyCode == UInt16(kVK_ANSI_T) {
             apply(.selectTool(.text))
+        } else if event.keyCode == UInt16(kVK_ANSI_L) {
+            apply(.selectTool(.laser))
         } else if let color = paletteColor(for: event.keyCode) {
             apply(.selectColor(color))
         }
