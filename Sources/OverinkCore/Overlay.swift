@@ -3,10 +3,9 @@
 /// core no puede conocer —qué pantalla contiene el cursor— y pinta el resultado.
 public struct Overlay: Sendable {
     public private(set) var state: OverlayState
-    private var canvas = Canvas()
+    private var contentsByStage: [StageID: StageContent] = [:]
     private var strokeInProgress: [Point] = []
     private var eraserPoint: Point?
-    private var history = History()
 
     public init() {
         state = .dismissed
@@ -23,7 +22,11 @@ public struct Overlay: Sendable {
             // mirarse mientras dure: el atajo pulsado con el cursor en la otra pantalla
             // descarta, nunca mueve el Overlay de sitio.
             case .dismissed:
-                state = .armed(stage: stageUnderCursor, canvas: canvas, liveStroke: liveStroke)
+                state = .armed(
+                    stage: stageUnderCursor,
+                    canvas: contentsByStage[stageUnderCursor]?.canvas ?? Canvas(),
+                    liveStroke: liveStroke
+                )
             case .armed:
                 cancelLiveStroke()
                 state = .dismissed
@@ -73,8 +76,7 @@ public struct Overlay: Sendable {
 
             cancelLiveStroke()
             let operation = CanvasOperation.remove(canvas.marks[index], at: index)
-            operation.apply(to: &canvas)
-            history.record(operation)
+            applyAndRecord(operation)
             state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
         case .clear:
             guard case .armed(let stage, _, _) = state else { return }
@@ -85,21 +87,67 @@ public struct Overlay: Sendable {
                 return
             }
             let operation = CanvasOperation.clear(canvas.marks)
-            operation.apply(to: &canvas)
-            history.record(operation)
+            applyAndRecord(operation)
             state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
         case .undo:
             guard case .armed(let stage, _, _) = state else { return }
 
             cancelLiveStroke()
-            history.undo(on: &canvas)
+            var updatedCanvas = canvas
+            var updatedHistory = history
+            updatedHistory.undo(on: &updatedCanvas)
+            canvas = updatedCanvas
+            history = updatedHistory
             state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
         case .redo:
             guard case .armed(let stage, _, _) = state else { return }
 
             cancelLiveStroke()
-            history.redo(on: &canvas)
+            var updatedCanvas = canvas
+            var updatedHistory = history
+            updatedHistory.redo(on: &updatedCanvas)
+            canvas = updatedCanvas
+            history = updatedHistory
             state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+        case .stagesChanged(let availableStages):
+            let disconnectedStages = Set(contentsByStage.keys).subtracting(availableStages)
+            for stage in disconnectedStages {
+                contentsByStage[stage] = nil
+            }
+            if let activeStage = state.stage, !availableStages.contains(activeStage) {
+                cancelLiveStroke()
+                state = .dismissed
+            }
+        }
+    }
+
+    private var activeStage: StageID? {
+        state.stage
+    }
+
+    private var canvas: Canvas {
+        get {
+            guard let activeStage else { return Canvas() }
+            return contentsByStage[activeStage]?.canvas ?? Canvas()
+        }
+        set {
+            guard let activeStage else { return }
+            var content = contentsByStage[activeStage] ?? StageContent()
+            content.canvas = newValue
+            contentsByStage[activeStage] = content
+        }
+    }
+
+    private var history: History {
+        get {
+            guard let activeStage else { return History() }
+            return contentsByStage[activeStage]?.history ?? History()
+        }
+        set {
+            guard let activeStage else { return }
+            var content = contentsByStage[activeStage] ?? StageContent()
+            content.history = newValue
+            contentsByStage[activeStage] = content
         }
     }
 
@@ -111,9 +159,17 @@ public struct Overlay: Sendable {
         guard !strokeInProgress.isEmpty else { return }
 
         let operation = CanvasOperation.add(.stroke(Stroke(points: strokeInProgress)))
-        operation.apply(to: &canvas)
-        history.record(operation)
+        applyAndRecord(operation)
         strokeInProgress = []
+    }
+
+    private mutating func applyAndRecord(_ operation: CanvasOperation) {
+        var updatedCanvas = canvas
+        var updatedHistory = history
+        operation.apply(to: &updatedCanvas)
+        updatedHistory.record(operation)
+        canvas = updatedCanvas
+        history = updatedHistory
     }
 
     private mutating func cancelLiveStroke() {
@@ -131,10 +187,16 @@ public struct Overlay: Sendable {
         // De atrás hacia delante los índices de los Marks aún no borrados no cambian.
         for index in touchedIndices.reversed() {
             let operation = CanvasOperation.remove(canvas.marks[index], at: index)
-            operation.apply(to: &canvas)
-            history.record(operation)
+            applyAndRecord(operation)
         }
     }
+}
+
+/// El estado persistente de un Stage: Canvas e History deben tener exactamente el mismo
+/// ciclo de vida porque Undo solo puede actuar sobre el Canvas al que pertenece.
+private struct StageContent: Sendable {
+    var canvas = Canvas()
+    var history = History()
 }
 
 /// En cuál de sus estados está el Overlay. Editing, el subestado de Armed en el que se
@@ -173,6 +235,9 @@ public enum Command: Equatable, Sendable {
     /// Revierte o reaplica la última operación del History.
     case undo
     case redo
+    /// La shell comunica el conjunto de Stages disponibles cuando macOS cambia la
+    /// configuración de pantallas. El core descarta Canvas e History de los ausentes.
+    case stagesChanged(to: Set<StageID>)
 }
 
 /// Una coordenada de la superficie del Overlay, independiente de AppKit.

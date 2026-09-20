@@ -109,6 +109,62 @@ func losStrokesReaparecenAlVolverAArmarElOverlay() {
     #expect(overlay.state.finishedMarkCount == 1)
 }
 
+@Test("Cada Stage conserva sus propios Marks sin trasladarlos")
+func cadaStageConservaSusPropiosMarks() {
+    var overlay = Overlay()
+    let strokeDelMonitor = Stroke(points: [Point(x: 10, y: 20)])
+    let strokeDelPortatil = Stroke(points: [Point(x: 900, y: 600)])
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 20))
+    overlay.apply(.dismiss, at: arranque)
+    overlay.apply(.toggle(stageUnderCursor: portatil), at: arranque)
+
+    #expect(overlay.state.finishedMarks.isEmpty)
+
+    dibujaUnStroke(en: &overlay, desde: Point(x: 900, y: 600))
+    overlay.apply(.dismiss, at: arranque)
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+
+    #expect(overlay.state.finishedMarks == [.stroke(strokeDelMonitor)])
+    overlay.apply(.dismiss, at: arranque)
+    overlay.apply(.toggle(stageUnderCursor: portatil), at: arranque)
+    #expect(overlay.state.finishedMarks == [.stroke(strokeDelPortatil)])
+}
+
+@Test("Undo solo revierte el History del Stage activo")
+func undoSoloRevierteElHistoryDelStageActivo() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 20))
+    overlay.apply(.dismiss, at: arranque)
+    overlay.apply(.toggle(stageUnderCursor: portatil), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 900, y: 600))
+    overlay.apply(.undo, at: arranque)
+
+    #expect(overlay.state.finishedMarks.isEmpty)
+
+    overlay.apply(.dismiss, at: arranque)
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    #expect(overlay.state.finishedMarkCount == 1)
+}
+
+@Test("Desconectar un Stage descarta su Canvas e History")
+func desconectarUnStageDescartaSuCanvasEHistory() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    dibujaUnStroke(en: &overlay, desde: Point(x: 10, y: 20))
+    overlay.apply(.dismiss, at: arranque)
+    overlay.apply(.stagesChanged(to: [portatil]), at: arranque)
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+
+    #expect(overlay.state.finishedMarks.isEmpty)
+    overlay.apply(.undo, at: arranque)
+    #expect(overlay.state.finishedMarks.isEmpty)
+}
+
 @Test("Descartar durante un gesto no termina el Stroke")
 func descartarDuranteUnGestoNoTerminaElStroke() {
     var overlay = Overlay()

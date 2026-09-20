@@ -11,11 +11,24 @@ final class OverlayController {
     private var overlay = Overlay()
     private var window: OverlayWindow?
     private var hotKey: GlobalHotKey?
+    private var screenParametersObserver: NSObjectProtocol?
     private let watchdog = MainThreadWatchdog()
 
     /// El core recibe el instante en cada comando y nunca lee el reloj. Aquí se usa un
     /// reloj monótono: el Auto-Dismiss no debe descolocarse porque cambie la hora.
     private let launch = ContinuousClock.now
+
+    init() {
+        screenParametersObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.screensChanged()
+            }
+        }
+    }
 
     /// Registra `Ctrl+Shift+D`. Devuelve `false` si Carbon rechaza el atajo, que es lo
     /// que pasa cuando otra aplicación ya lo tiene cogido.
@@ -125,6 +138,14 @@ final class OverlayController {
         // del sistema se lleva el foco —y ADR-0005 exige que pueda—, vuelve en cuanto se
         // hace clic en el Overlay, que cubre la pantalla entera. La salida que no depende
         // del foco es el atajo global, que va por Carbon y no por la ventana.
+    }
+
+    /// macOS publica esta notificación cuando se conecta o desconecta una pantalla. La
+    /// shell aporta los Stages que siguen existiendo; el core descarta los Canvas e
+    /// History de los que ya no tienen superficie.
+    private func screensChanged() {
+        let availableStages = Set(NSScreen.screens.compactMap(Self.stageID(of:)))
+        apply(.stagesChanged(to: availableStages))
     }
 
     /// La pantalla que contiene el cursor ahora mismo. Se consulta solo al pulsar el
