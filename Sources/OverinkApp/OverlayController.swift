@@ -64,18 +64,22 @@ final class OverlayController {
         switch overlay.state {
         case .armed(let stage, let canvas, let liveStroke, _, _):
             watchdog.start()
-            show(on: stage, canvas: canvas, liveStroke: liveStroke)
+            show(on: stage, canvas: canvas, liveStroke: liveStroke, editingLabel: nil)
+        case .editing(let stage, let canvas, let label, _, _):
+            watchdog.start()
+            show(on: stage, canvas: canvas, liveStroke: nil, editingLabel: label)
         case .dismissed:
             watchdog.stop()
             hide()
         }
     }
 
-    private func show(on stage: StageID, canvas: Canvas, liveStroke: Stroke?) {
+    private func show(on stage: StageID, canvas: Canvas, liveStroke: Stroke?, editingLabel: Label?) {
         if let window {
             let view = window.contentView as? OverlayView
             view?.canvas = canvas
             view?.liveStroke = liveStroke
+            view?.editingLabel = editingLabel
             return
         }
 
@@ -94,6 +98,7 @@ final class OverlayController {
         view.onPointer = { [weak self] command in self?.apply(command) }
         view.canvas = canvas
         view.liveStroke = liveStroke
+        view.editingLabel = editingLabel
         overlayWindow.contentView = view
 
         // Una app `.accessory` no se activa sola: sin esto la ventana se vería pero el
@@ -123,6 +128,17 @@ final class OverlayController {
     }
 
     private func handle(_ event: NSEvent) {
+        if overlay.state.editingLabel != nil {
+            if event.keyCode == UInt16(kVK_Escape) {
+                apply(.cancelLabel)
+            } else if event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter) {
+                apply(.confirmLabel)
+            } else if let text = event.characters {
+                apply(.typeText(text))
+            }
+            return
+        }
+
         // Esc nunca es inerte (regla 3 de ADR-0005): desde Armed pasa a Dismissed.
         if event.keyCode == UInt16(kVK_Escape) {
             apply(.dismiss)
@@ -136,6 +152,8 @@ final class OverlayController {
             apply(.selectTool(.highlighter))
         } else if event.keyCode == UInt16(kVK_ANSI_E) {
             apply(.selectTool(.eraser))
+        } else if event.keyCode == UInt16(kVK_ANSI_T) {
+            apply(.selectTool(.text))
         } else if let color = paletteColor(for: event.keyCode) {
             apply(.selectColor(color))
         }

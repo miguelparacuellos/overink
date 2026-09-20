@@ -109,6 +109,76 @@ func lasTeclasDeToolCambianLaToolActiva() {
     #expect(overlay.state.tool == .pen)
 }
 
+@Test("T selecciona el Text tool")
+func tSeleccionaElTextTool() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.text), at: arranque)
+
+    #expect(overlay.state.tool == .text)
+}
+
+@Test("En Editing las teclas de atajo se añaden al Label")
+func enEditingLosAtajosSonTexto() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.text), at: arranque)
+    overlay.apply(.penDown(at: Point(x: 10, y: 20)), at: arranque)
+    overlay.apply(.typeText("pen"), at: arranque)
+
+    #expect(overlay.state.editingLabel?.text == "pen")
+    #expect(overlay.state.tool == .text)
+}
+
+@Test("Confirmar un Label lo añade al Canvas")
+func confirmarUnLabelLoAnadeAlCanvas() {
+    var overlay = Overlay()
+    let anchor = Point(x: 10, y: 20)
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.text), at: arranque)
+    overlay.apply(.penDown(at: anchor), at: arranque)
+    overlay.apply(.typeText("pen"), at: arranque)
+    overlay.apply(.confirmLabel, at: arranque)
+
+    #expect(overlay.state.finishedMarks == [.label(Label(anchor: anchor, text: "pen"))])
+    #expect(overlay.state.tool == .text)
+}
+
+@Test("Cancelar un Label no modifica el Canvas")
+func cancelarUnLabelNoModificaElCanvas() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.text), at: arranque)
+    overlay.apply(.penDown(at: Point(x: 10, y: 20)), at: arranque)
+    overlay.apply(.typeText("pen"), at: arranque)
+    overlay.apply(.cancelLabel, at: arranque)
+
+    #expect(overlay.state.finishedMarks.isEmpty)
+    #expect(overlay.state.tool == .text)
+}
+
+@Test("El Eraser borra entero un Label y Undo lo devuelve")
+func elEraserBorraEnteroUnLabelYUndoLoDevuelve() {
+    var overlay = Overlay()
+    let label = Label(anchor: Point(x: 10, y: 20), text: "pen")
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.text), at: arranque)
+    overlay.apply(.penDown(at: label.anchor), at: arranque)
+    overlay.apply(.typeText(label.text), at: arranque)
+    overlay.apply(.confirmLabel, at: arranque)
+    overlay.apply(.selectTool(.eraser), at: arranque)
+    borra(en: &overlay, desde: Point(x: 15, y: 25), hasta: Point(x: 15, y: 25))
+
+    #expect(overlay.state.finishedMarks.isEmpty)
+    overlay.apply(.undo, at: arranque)
+    #expect(overlay.state.finishedMarks == [.label(label)])
+}
+
 @Test("El color seleccionado recibe los Strokes nuevos")
 func elColorActivoLlegaAlStrokeNuevo() {
     var overlay = Overlay()

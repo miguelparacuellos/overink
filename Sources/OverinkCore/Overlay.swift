@@ -11,6 +11,7 @@ public struct Overlay: Sendable {
     private var selectedTool = Tool.pen
     private var selectedColor = PaletteColor.one
     private var eraserPoint: Point?
+    private var labelInProgress: Label?
 
     public init() {
         state = .dismissed
@@ -37,9 +38,13 @@ public struct Overlay: Sendable {
             case .armed:
                 cancelLiveStroke()
                 state = .dismissed
+            case .editing:
+                cancelLiveLabel()
+                state = .dismissed
             }
         case .dismiss:
             cancelLiveStroke()
+            cancelLiveLabel()
             state = .dismissed
         case .penDown(let point):
             beginPointer(at: point)
@@ -102,6 +107,23 @@ public struct Overlay: Sendable {
             updatedHistory.redo(on: &updatedCanvas)
             canvas = updatedCanvas
             history = updatedHistory
+            state = armedState(on: stage)
+        case .typeText(let text):
+            guard case .editing(let stage, _, _, _, _) = state, var label = labelInProgress else { return }
+
+            label.append(text)
+            labelInProgress = label
+            state = editingState(on: stage)
+        case .confirmLabel:
+            guard case .editing(let stage, _, _, _, _) = state, let label = labelInProgress else { return }
+
+            applyAndRecord(.add(.label(label)))
+            labelInProgress = nil
+            state = armedState(on: stage)
+        case .cancelLabel:
+            guard case .editing(let stage, _, _, _, _) = state else { return }
+
+            cancelLiveLabel()
             state = armedState(on: stage)
         case .selectTool(let tool):
             guard case .armed(let stage, _, _, _, _) = state else { return }
@@ -192,11 +214,26 @@ public struct Overlay: Sendable {
         eraserPoint = nil
     }
 
+    private mutating func cancelLiveLabel() {
+        labelInProgress = nil
+    }
+
     private func armedState(on stage: StageID) -> OverlayState {
         .armed(
             stage: stage,
             canvas: canvas,
             liveStroke: liveStroke,
+            tool: selectedTool,
+            color: selectedColor
+        )
+    }
+
+    private func editingState(on stage: StageID) -> OverlayState {
+        guard let labelInProgress else { return armedState(on: stage) }
+        return .editing(
+            stage: stage,
+            canvas: canvas,
+            label: labelInProgress,
             tool: selectedTool,
             color: selectedColor
         )
@@ -217,6 +254,11 @@ public struct Overlay: Sendable {
             cancelLiveStroke()
             eraseMarks(touchedBy: point, and: point)
             eraserPoint = point
+        case .text:
+            cancelLiveStroke()
+            labelInProgress = Label(anchor: point, text: "", color: selectedColor)
+            state = editingState(on: stage)
+            return
         }
         state = armedState(on: stage)
     }
@@ -232,6 +274,8 @@ public struct Overlay: Sendable {
             guard let previousPoint = eraserPoint else { return }
             eraseMarks(touchedBy: previousPoint, and: point)
             eraserPoint = point
+        case .text:
+            return
         }
         state = armedState(on: stage)
     }
@@ -244,6 +288,8 @@ public struct Overlay: Sendable {
             finishStroke()
         case .eraser:
             eraserPoint = nil
+        case .text:
+            return
         }
         state = armedState(on: stage)
     }
@@ -275,20 +321,32 @@ private struct StageContent: Sendable {
 public enum OverlayState: Equatable, Sendable {
     case dismissed
     case armed(stage: StageID, canvas: Canvas, liveStroke: Stroke?, tool: Tool, color: PaletteColor)
+    case editing(stage: StageID, canvas: Canvas, label: Label, tool: Tool, color: PaletteColor)
 
     public var stage: StageID? {
-        guard case .armed(let stage, _, _, _, _) = self else { return nil }
-        return stage
+        switch self {
+        case .armed(let stage, _, _, _, _), .editing(let stage, _, _, _, _): stage
+        case .dismissed: nil
+        }
     }
 
     public var tool: Tool? {
-        guard case .armed(_, _, _, let tool, _) = self else { return nil }
-        return tool
+        switch self {
+        case .armed(_, _, _, let tool, _), .editing(_, _, _, let tool, _): tool
+        case .dismissed: nil
+        }
     }
 
     public var color: PaletteColor? {
-        guard case .armed(_, _, _, _, let color) = self else { return nil }
-        return color
+        switch self {
+        case .armed(_, _, _, _, let color), .editing(_, _, _, _, let color): color
+        case .dismissed: nil
+        }
+    }
+
+    public var editingLabel: Label? {
+        guard case .editing(_, _, let label, _, _) = self else { return nil }
+        return label
     }
 }
 
@@ -297,6 +355,7 @@ public enum Tool: Equatable, Sendable {
     case pen
     case highlighter
     case eraser
+    case text
 }
 
 /// Los cuatro colores de la Palette. Sus componentes viven aquí, sin depender de AppKit,
@@ -357,6 +416,10 @@ public enum Command: Equatable, Sendable {
     /// Revierte o reaplica la última operación del History.
     case undo
     case redo
+    /// Texto que se añade al Label en curso; durante Editing no se interpreta como atajo.
+    case typeText(String)
+    case confirmLabel
+    case cancelLabel
     /// La shell comunica el conjunto de Stages disponibles cuando macOS cambia la
     /// configuración de pantallas. El core descarta Canvas e History de los ausentes.
     case stagesChanged(to: Set<StageID>)
@@ -471,12 +534,42 @@ private struct History: Sendable {
 /// llegará con el Text tool sin cambiar la costura que lee la shell.
 public enum Mark: Equatable, Sendable {
     case stroke(Stroke)
+    case label(Label)
 
     fileprivate func isTouched(byEraserSegmentFrom start: Point, to end: Point) -> Bool {
         switch self {
         case .stroke(let stroke):
             stroke.isTouched(byEraserSegmentFrom: start, to: end)
+        case .label(let label):
+            label.isTouched(byEraserSegmentFrom: start, to: end)
         }
+    }
+}
+
+/// Un Mark inmutable de texto, anclado al punto en el que se hizo clic con el Text tool.
+public struct Label: Equatable, Sendable {
+    public static let fontSize = 24.0
+    public let anchor: Point
+    public private(set) var text: String
+    public let color: PaletteColor
+
+    public init(anchor: Point, text: String, color: PaletteColor = .one) {
+        self.anchor = anchor
+        self.text = text
+        self.color = color
+    }
+
+    mutating func append(_ text: String) {
+        self.text.append(contentsOf: text)
+    }
+
+    fileprivate func isTouched(byEraserSegmentFrom start: Point, to end: Point) -> Bool {
+        let width = max(Self.fontSize, Double(text.count) * Self.fontSize * 0.6)
+        let height = Self.fontSize
+        let nearestX = min(max(start.x, anchor.x), anchor.x + width)
+        let nearestY = min(max(start.y, anchor.y), anchor.y + height)
+        return squaredDistance(from: Point(x: nearestX, y: nearestY), to: start, end)
+            <= pow2(Stroke.eraserRadius)
     }
 }
 

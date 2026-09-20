@@ -56,6 +56,9 @@ final class OverlayView: NSView {
     var liveStroke: Stroke? {
         didSet { needsDisplay = true }
     }
+    var editingLabel: Label? {
+        didSet { needsDisplay = true }
+    }
 
     // Sin esto la ventana no entrega el teclado a nadie.
     override var acceptsFirstResponder: Bool { true }
@@ -130,6 +133,26 @@ final class OverlayView: NSView {
                 graphicsContext?.endTransparencyLayer()
                 graphicsContext?.restoreGState()
             }
+        }
+
+        let finishedLabels = canvas.marks.compactMap { mark -> Label? in
+            guard case .label(let label) = mark else { return nil }
+            return label
+        }
+        for label in finishedLabels + [editingLabel].compactMap({ $0 }) {
+            let color = NSColor(
+                red: label.color.components.red,
+                green: label.color.components.green,
+                blue: label.color.components.blue,
+                alpha: 1
+            )
+            label.text.draw(
+                at: NSPoint(x: label.anchor.x, y: label.anchor.y),
+                withAttributes: [
+                    .font: NSFont.systemFont(ofSize: Label.fontSize),
+                    .foregroundColor: color,
+                ]
+            )
         }
     }
 
