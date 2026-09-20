@@ -550,33 +550,51 @@ public struct Point: Equatable, Sendable {
 /// estado visible del Overlay, así que pasar a Dismissed no lo destruye.
 public struct Canvas: Equatable, Sendable {
     public private(set) var marks: [Mark]
+    /// Identifica una nueva imagen de los Marks sin obligar a que la shell compare todo
+    /// el Canvas en cada evento de puntero. No forma parte de la identidad del Canvas:
+    /// dos Canvas con los mismos Marks siguen siendo iguales.
+    public private(set) var renderingRevision: UInt = 0
 
     public init(marks: [Mark] = []) {
         self.marks = marks
     }
 
+    public static func == (lhs: Canvas, rhs: Canvas) -> Bool {
+        lhs.marks == rhs.marks
+    }
+
     mutating func append(_ mark: Mark) {
         marks.append(mark)
+        advanceRenderingRevision()
     }
 
     mutating func insert(_ mark: Mark, at index: Int) {
         marks.insert(mark, at: index)
+        advanceRenderingRevision()
     }
 
     mutating func removeLastMark() {
         marks.removeLast()
+        advanceRenderingRevision()
     }
 
     mutating func removeMark(at index: Int) {
         marks.remove(at: index)
+        advanceRenderingRevision()
     }
 
     mutating func removeAllMarks() {
         marks.removeAll()
+        advanceRenderingRevision()
     }
 
     mutating func replaceMarks(with marks: [Mark]) {
         self.marks = marks
+        advanceRenderingRevision()
+    }
+
+    private mutating func advanceRenderingRevision() {
+        renderingRevision &+= 1
     }
 }
 

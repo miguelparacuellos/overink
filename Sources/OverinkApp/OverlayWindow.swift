@@ -53,23 +53,48 @@ final class OverlayView: NSView {
     var onPointer: ((Command) -> Void)?
     var onInput: (() -> Void)?
     var canvas = Canvas() {
-        didSet { needsDisplay = true }
+        didSet { invalidateFinishedMarksCache() }
     }
     var liveStroke: Stroke? {
-        didSet { needsDisplay = true }
+        didSet {
+            guard liveStroke != oldValue else { return }
+            needsDisplay = true
+        }
     }
     var laserTrail: Stroke? {
-        didSet { needsDisplay = true }
+        didSet {
+            guard laserTrail != oldValue else { return }
+            needsDisplay = true
+        }
     }
     var editingLabel: Label? {
-        didSet { needsDisplay = true }
+        didSet {
+            guard editingLabel != oldValue else { return }
+            needsDisplay = true
+        }
     }
     var activeTool = Tool.pen {
-        didSet { needsDisplay = true }
+        didSet {
+            guard activeTool != oldValue else { return }
+            needsDisplay = true
+        }
     }
     var activeColor = PaletteColor.one {
-        didSet { needsDisplay = true }
+        didSet {
+            guard activeColor != oldValue else { return }
+            needsDisplay = true
+        }
     }
+
+    /// Los Marks terminados no cambian durante el gesto. Se rasterizan una vez por
+    /// modificación del Canvas; los frames siguientes solo componen esta imagen con el
+    /// contenido efímero. Así el coste de arrastrar no depende de lo lleno que esté el
+    /// Canvas (ADR-0006).
+    private var finishedMarksCache: NSImage?
+    private var cacheSize = NSSize.zero
+    private var cacheScale: CGFloat = 0
+
+    var renderedCanvasRevision: UInt { canvas.renderingRevision }
 
     // Sin esto la ventana no entrega el teclado a nadie.
     override var acceptsFirstResponder: Bool { true }
@@ -140,11 +165,80 @@ final class OverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        let finishedStrokes = canvas.marks.compactMap { mark -> Stroke? in
+        cachedFinishedMarks().draw(in: bounds)
+        drawStrokes([liveStroke, laserTrail].compactMap { $0 })
+        drawLabels([editingLabel].compactMap { $0 })
+        drawHUD()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        invalidateFinishedMarksCache()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        invalidateFinishedMarksCache()
+    }
+
+    private func cachedFinishedMarks() -> NSImage {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1
+        guard let finishedMarksCache, cacheSize == bounds.size, cacheScale == scale else {
+            let image = renderFinishedMarksCache(scale: scale)
+            finishedMarksCache = image
+            cacheSize = bounds.size
+            cacheScale = scale
+            return image
+        }
+        return finishedMarksCache
+    }
+
+    private func renderFinishedMarksCache(scale: CGFloat) -> NSImage {
+        let pixelsWide = max(1, Int((bounds.width * scale).rounded(.up)))
+        let pixelsHigh = max(1, Int((bounds.height * scale).rounded(.up)))
+        let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelsWide,
+            pixelsHigh: pixelsHigh,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        )!
+        bitmap.size = bounds.size
+
+        let previousContext = NSGraphicsContext.current
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        // Un bitmap usa píxeles como unidad; los Marks usan puntos del Stage. Mantener
+        // ambas escalas evita que la caché quede reducida en pantallas Retina.
+        NSGraphicsContext.current?.cgContext.scaleBy(x: scale, y: scale)
+        NSColor.clear.setFill()
+        bounds.fill()
+        drawStrokes(canvas.marks.compactMap { mark in
             guard case .stroke(let stroke) = mark else { return nil }
             return stroke
-        }
-        for stroke in finishedStrokes + [liveStroke, laserTrail].compactMap({ $0 }) {
+        })
+        drawLabels(canvas.marks.compactMap { mark in
+            guard case .label(let label) = mark else { return nil }
+            return label
+        })
+        NSGraphicsContext.current = previousContext
+
+        let image = NSImage(size: bounds.size)
+        image.addRepresentation(bitmap)
+        return image
+    }
+
+    private func invalidateFinishedMarksCache() {
+        finishedMarksCache = nil
+        needsDisplay = true
+    }
+
+    private func drawStrokes(_ strokes: [Stroke]) {
+        for stroke in strokes {
             let color = NSColor(
                 red: stroke.color.components.red,
                 green: stroke.color.components.green,
@@ -189,12 +283,10 @@ final class OverlayView: NSView {
                 graphicsContext?.restoreGState()
             }
         }
+    }
 
-        let finishedLabels = canvas.marks.compactMap { mark -> Label? in
-            guard case .label(let label) = mark else { return nil }
-            return label
-        }
-        for label in finishedLabels + [editingLabel].compactMap({ $0 }) {
+    private func drawLabels(_ labels: [Label]) {
+        for label in labels {
             let color = NSColor(
                 red: label.color.components.red,
                 green: label.color.components.green,
@@ -209,8 +301,6 @@ final class OverlayView: NSView {
                 ]
             )
         }
-
-        drawHUD()
     }
 
     /// El HUD es pintura de esta vista, no un control: no instala gestos, botones ni

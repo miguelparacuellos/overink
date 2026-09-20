@@ -158,7 +158,9 @@ final class OverlayController {
     ) {
         if let window {
             let view = window.contentView as? OverlayView
-            view?.canvas = canvas
+            if view?.renderedCanvasRevision != canvas.renderingRevision {
+                view?.canvas = canvas
+            }
             view?.liveStroke = liveStroke
             view?.laserTrail = laserTrail
             view?.editingLabel = editingLabel
