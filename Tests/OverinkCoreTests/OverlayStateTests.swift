@@ -83,6 +83,69 @@ func descartarEnDismissedEsInocuo() {
     #expect(overlay.state == .dismissed)
 }
 
+@Test("Quince minutos sin entrada descartan el Overlay")
+func quinceMinutosSinEntradaDescartanElOverlay() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.timeTick, at: Instant(sinceLaunch: .seconds(15 * 60)))
+
+    #expect(overlay.state == .dismissed)
+}
+
+@Test("Una entrada reinicia los quince minutos del Auto-Dismiss")
+func unaEntradaReiniciaLosQuinceMinutosDelAutoDismiss() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.inputReceived, at: Instant(sinceLaunch: .seconds(14 * 60)))
+    overlay.apply(.timeTick, at: Instant(sinceLaunch: .seconds(15 * 60)))
+
+    #expect(overlay.state.stage == monitor)
+    overlay.apply(.timeTick, at: Instant(sinceLaunch: .seconds(29 * 60)))
+    #expect(overlay.state == .dismissed)
+}
+
+@Test("El Auto-Dismiss confirma el Label que se está editando")
+func elAutoDismissConfirmaElLabelQueSeEstaEditando() {
+    var overlay = Overlay()
+    let anchor = Point(x: 10, y: 20)
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.selectTool(.text), at: arranque)
+    overlay.apply(.penDown(at: anchor), at: arranque)
+    overlay.apply(.typeText("pen"), at: arranque)
+    overlay.apply(.timeTick, at: Instant(sinceLaunch: .seconds(15 * 60)))
+
+    #expect(overlay.state == .dismissed)
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: Instant(sinceLaunch: .seconds(15 * 60)))
+    #expect(overlay.state.finishedMarks == [.label(Label(anchor: anchor, text: "pen"))])
+}
+
+@Test("El Auto-Dismiss conserva los Marks terminados del Canvas")
+func elAutoDismissConservaLosMarksTerminadosDelCanvas() {
+    var overlay = Overlay()
+    let point = Point(x: 10, y: 20)
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.penDown(at: point), at: arranque)
+    overlay.apply(.penUp, at: arranque)
+    overlay.apply(.timeTick, at: Instant(sinceLaunch: .seconds(15 * 60)))
+
+    #expect(overlay.state == .dismissed)
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: Instant(sinceLaunch: .seconds(15 * 60)))
+    #expect(overlay.state.finishedMarks == [.stroke(Stroke(points: [point]))])
+}
+
+@Test("El tic de tiempo en Dismissed no inicia una cuenta")
+func elTicDeTiempoEnDismissedNoIniciaUnaCuenta() {
+    var overlay = Overlay()
+
+    overlay.apply(.timeTick, at: Instant(sinceLaunch: .seconds(15 * 60)))
+
+    #expect(overlay.state == .dismissed)
+}
+
 @Test("Un gesto del Pen deja un Stroke visible")
 func unGestoDelPenDejaUnStrokeVisible() {
     var overlay = Overlay()

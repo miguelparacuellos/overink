@@ -27,6 +27,7 @@ final class OverlayWindow: NSWindow {
         backgroundColor = .clear
         hasShadow = false
         ignoresMouseEvents = false
+        acceptsMouseMovedEvents = true
         // Que aparezca en el Space que haya activo y también sobre una app a pantalla
         // completa, sin salir en el conmutador de ventanas.
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
@@ -50,6 +51,7 @@ final class OverlayView: NSView {
     /// Qué hacer con una tecla. La vista no decide nada: traduce y avisa.
     var onKeyDown: ((NSEvent) -> Void)?
     var onPointer: ((Command) -> Void)?
+    var onInput: (() -> Void)?
     var canvas = Canvas() {
         didSet { needsDisplay = true }
     }
@@ -73,19 +75,63 @@ final class OverlayView: NSView {
         // En Armed el Overlay se queda con el teclado entero (ADR-0002). No se llama a
         // `super`: eso haría sonar el beep de tecla no manejada en todo lo que aún no
         // hace nada.
+        onInput?()
         onKeyDown?(event)
     }
 
     override func mouseDown(with event: NSEvent) {
+        onInput?()
         onPointer?(.penDown(at: point(for: event)))
     }
 
     override func mouseDragged(with event: NSEvent) {
+        onInput?()
         onPointer?(.penMoved(to: point(for: event)))
     }
 
     override func mouseUp(with event: NSEvent) {
+        onInput?()
         onPointer?(.penUp)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        onInput?()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onInput?()
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        onInput?()
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        onInput?()
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        onInput?()
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        onInput?()
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        onInput?()
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        onInput?()
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        onInput?()
+    }
+
+    override func keyUp(with event: NSEvent) {
+        onInput?()
     }
 
     override func draw(_ dirtyRect: NSRect) {

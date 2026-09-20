@@ -13,6 +13,9 @@ final class OverlayController {
     private var hotKey: GlobalHotKey?
     private var screenParametersObserver: NSObjectProtocol?
     private let watchdog = MainThreadWatchdog()
+    private var autoDismissTimer: Timer?
+
+    private static let autoDismissDelay: TimeInterval = 15 * 60
 
     /// El core recibe el instante en cada comando y nunca lee el reloj. Aquí se usa un
     /// reloj monótono: el Auto-Dismiss no debe descolocarse porque cambie la hora.
@@ -58,12 +61,18 @@ final class OverlayController {
         syncWindow()
     }
 
+    private func receivedInput() {
+        apply(.inputReceived)
+        restartAutoDismissTimer()
+    }
+
     /// Monta o quita la ventana según lo que diga el estado del core, que es la única
     /// fuente.
     private func syncWindow() {
         switch overlay.state {
         case .armed(let stage, let canvas, let liveStroke, let tool, let color):
             watchdog.start()
+            startAutoDismissTimer()
             show(
                 on: stage,
                 canvas: canvas,
@@ -74,6 +83,7 @@ final class OverlayController {
             )
         case .editing(let stage, let canvas, let label, let tool, let color):
             watchdog.start()
+            startAutoDismissTimer()
             show(
                 on: stage,
                 canvas: canvas,
@@ -84,8 +94,33 @@ final class OverlayController {
             )
         case .dismissed:
             watchdog.stop()
+            stopAutoDismissTimer()
             hide()
         }
+    }
+
+    private func startAutoDismissTimer() {
+        guard autoDismissTimer == nil else { return }
+
+        let timer = Timer(timeInterval: Self.autoDismissDelay, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.autoDismissTimer = nil
+                self.apply(.timeTick)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        autoDismissTimer = timer
+    }
+
+    private func restartAutoDismissTimer() {
+        stopAutoDismissTimer()
+        startAutoDismissTimer()
+    }
+
+    private func stopAutoDismissTimer() {
+        autoDismissTimer?.invalidate()
+        autoDismissTimer = nil
     }
 
     private func show(
@@ -119,6 +154,7 @@ final class OverlayController {
         view.autoresizingMask = [.width, .height]
         view.onKeyDown = { [weak self] event in self?.handle(event) }
         view.onPointer = { [weak self] command in self?.apply(command) }
+        view.onInput = { [weak self] in self?.receivedInput() }
         view.canvas = canvas
         view.liveStroke = liveStroke
         view.editingLabel = editingLabel

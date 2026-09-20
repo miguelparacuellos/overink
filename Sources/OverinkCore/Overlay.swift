@@ -12,6 +12,9 @@ public struct Overlay: Sendable {
     private var selectedColor = PaletteColor.one
     private var eraserPoint: Point?
     private var labelInProgress: Label?
+    private var lastInputAt: Instant?
+
+    private static let autoDismissDelay = Duration.seconds(15 * 60)
 
     public init() {
         state = .dismissed
@@ -19,8 +22,11 @@ public struct Overlay: Sendable {
 
     /// Aplica un comando en un instante dado. El instante se recibe siempre desde fuera:
     /// el core nunca lee el reloj, que es lo que mantiene determinista el Auto-Dismiss.
-    /// Ninguno de los comandos de hoy lo usa todavía.
     public mutating func apply(_ command: Command, at instant: Instant) {
+        if command.isInputEvent {
+            recordInput(at: instant)
+        }
+
         switch command {
         case .toggle(let stageUnderCursor):
             switch state {
@@ -35,17 +41,25 @@ public struct Overlay: Sendable {
                     tool: selectedTool,
                     color: selectedColor
                 )
+                lastInputAt = instant
             case .armed:
                 cancelLiveStroke()
                 state = .dismissed
+                lastInputAt = nil
             case .editing:
                 cancelLiveLabel()
                 state = .dismissed
+                lastInputAt = nil
             }
         case .dismiss:
             cancelLiveStroke()
             cancelLiveLabel()
             state = .dismissed
+            lastInputAt = nil
+        case .inputReceived:
+            break
+        case .timeTick:
+            autoDismissIfNeeded(at: instant)
         case .penDown(let point):
             beginPointer(at: point)
         case .penMoved(let point):
@@ -144,8 +158,28 @@ public struct Overlay: Sendable {
             if let activeStage = state.stage, !availableStages.contains(activeStage) {
                 cancelLiveStroke()
                 state = .dismissed
+                lastInputAt = nil
             }
         }
+    }
+
+    private mutating func recordInput(at instant: Instant) {
+        guard state != .dismissed else { return }
+        lastInputAt = instant
+    }
+
+    private mutating func autoDismissIfNeeded(at instant: Instant) {
+        guard let lastInputAt,
+              instant.sinceLaunch - lastInputAt.sinceLaunch >= Self.autoDismissDelay
+        else { return }
+
+        cancelLiveStroke()
+        if let label = labelInProgress {
+            applyAndRecord(.add(.label(label)))
+        }
+        cancelLiveLabel()
+        state = .dismissed
+        self.lastInputAt = nil
     }
 
     private var activeStage: StageID? {
@@ -395,6 +429,12 @@ public enum Command: Equatable, Sendable {
     case toggle(stageUnderCursor: StageID)
     /// Pasar a Dismissed sin pasar por el atajo. Es lo que hace Esc.
     case dismiss
+    /// Un evento de entrada que no cambia ninguna otra decisión de dominio, pero reinicia
+    /// la cuenta del Auto-Dismiss.
+    case inputReceived
+    /// El tic de la shell para comprobar si quince minutos sin entrada deben ocultar el
+    /// Overlay. No cuenta como entrada.
+    case timeTick
     /// El Pen empieza, continúa o termina un gesto. La shell traduce sus eventos de
     /// puntero a estas intenciones; el core no conoce `NSEvent`.
     case penDown(at: Point)
@@ -423,6 +463,15 @@ public enum Command: Equatable, Sendable {
     /// La shell comunica el conjunto de Stages disponibles cuando macOS cambia la
     /// configuración de pantallas. El core descarta Canvas e History de los ausentes.
     case stagesChanged(to: Set<StageID>)
+
+    fileprivate var isInputEvent: Bool {
+        switch self {
+        case .timeTick, .stagesChanged:
+            false
+        default:
+            true
+        }
+    }
 }
 
 /// Una coordenada de la superficie del Overlay, independiente de AppKit.
