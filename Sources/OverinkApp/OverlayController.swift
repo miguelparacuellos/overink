@@ -62,24 +62,47 @@ final class OverlayController {
     /// fuente.
     private func syncWindow() {
         switch overlay.state {
-        case .armed(let stage, let canvas, let liveStroke, _, _):
+        case .armed(let stage, let canvas, let liveStroke, let tool, let color):
             watchdog.start()
-            show(on: stage, canvas: canvas, liveStroke: liveStroke, editingLabel: nil)
-        case .editing(let stage, let canvas, let label, _, _):
+            show(
+                on: stage,
+                canvas: canvas,
+                liveStroke: liveStroke,
+                editingLabel: nil,
+                activeTool: tool,
+                activeColor: color
+            )
+        case .editing(let stage, let canvas, let label, let tool, let color):
             watchdog.start()
-            show(on: stage, canvas: canvas, liveStroke: nil, editingLabel: label)
+            show(
+                on: stage,
+                canvas: canvas,
+                liveStroke: nil,
+                editingLabel: label,
+                activeTool: tool,
+                activeColor: color
+            )
         case .dismissed:
             watchdog.stop()
             hide()
         }
     }
 
-    private func show(on stage: StageID, canvas: Canvas, liveStroke: Stroke?, editingLabel: Label?) {
+    private func show(
+        on stage: StageID,
+        canvas: Canvas,
+        liveStroke: Stroke?,
+        editingLabel: Label?,
+        activeTool: Tool,
+        activeColor: PaletteColor
+    ) {
         if let window {
             let view = window.contentView as? OverlayView
             view?.canvas = canvas
             view?.liveStroke = liveStroke
             view?.editingLabel = editingLabel
+            view?.activeTool = activeTool
+            view?.activeColor = activeColor
             return
         }
 
@@ -99,6 +122,8 @@ final class OverlayController {
         view.canvas = canvas
         view.liveStroke = liveStroke
         view.editingLabel = editingLabel
+        view.activeTool = activeTool
+        view.activeColor = activeColor
         overlayWindow.contentView = view
 
         // Una app `.accessory` no se activa sola: sin esto la ventana se vería pero el

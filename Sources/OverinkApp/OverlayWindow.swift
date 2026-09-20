@@ -45,7 +45,7 @@ final class OverlayWindow: NSWindow {
 }
 
 /// La vista que ocupa el Overlay. Traduce la entrada a comandos y pinta el Canvas que el core
-/// expone; la selección de Tool vive en el core y el HUD llegará con su ticket.
+/// expone; la selección de Tool y Palette vive en el core, y aquí solo se refleja en el HUD.
 final class OverlayView: NSView {
     /// Qué hacer con una tecla. La vista no decide nada: traduce y avisa.
     var onKeyDown: ((NSEvent) -> Void)?
@@ -57,6 +57,12 @@ final class OverlayView: NSView {
         didSet { needsDisplay = true }
     }
     var editingLabel: Label? {
+        didSet { needsDisplay = true }
+    }
+    var activeTool = Tool.pen {
+        didSet { needsDisplay = true }
+    }
+    var activeColor = PaletteColor.one {
         didSet { needsDisplay = true }
     }
 
@@ -154,10 +160,75 @@ final class OverlayView: NSView {
                 ]
             )
         }
+
+        drawHUD()
+    }
+
+    /// El HUD es pintura de esta vista, no un control: no instala gestos, botones ni
+    /// targets. Por eso nunca modifica la Tool ni la Palette al pulsarlo.
+    private func drawHUD() {
+        let label = "\(activeTool.hudName) · Color \(activeColor.hudName)"
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.9),
+        ]
+        let textSize = (label as NSString).size(withAttributes: attributes)
+        let inset = CGFloat(10)
+        let dotSize = CGFloat(10)
+        let frame = NSRect(
+            x: bounds.maxX - textSize.width - dotSize - (inset * 3),
+            y: bounds.maxY - textSize.height - (inset * 2) - 12,
+            width: textSize.width + dotSize + (inset * 3),
+            height: textSize.height + (inset * 2)
+        )
+
+        NSColor.black.withAlphaComponent(0.55).setFill()
+        NSBezierPath(roundedRect: frame, xRadius: 8, yRadius: 8).fill()
+
+        let dotFrame = NSRect(
+            x: frame.minX + inset,
+            y: frame.midY - dotSize / 2,
+            width: dotSize,
+            height: dotSize
+        )
+        NSColor(
+            red: activeColor.components.red,
+            green: activeColor.components.green,
+            blue: activeColor.components.blue,
+            alpha: 1
+        ).setFill()
+        NSBezierPath(ovalIn: dotFrame).fill()
+
+        (label as NSString).draw(
+            at: NSPoint(x: dotFrame.maxX + inset, y: frame.midY - textSize.height / 2),
+            withAttributes: attributes
+        )
     }
 
     private func point(for event: NSEvent) -> Point {
         let location = convert(event.locationInWindow, from: nil)
         return Point(x: location.x, y: location.y)
+    }
+}
+
+private extension Tool {
+    var hudName: String {
+        switch self {
+        case .pen: "Pen"
+        case .highlighter: "Highlighter"
+        case .eraser: "Eraser"
+        case .text: "Text"
+        }
+    }
+}
+
+private extension PaletteColor {
+    var hudName: String {
+        switch self {
+        case .one: "1"
+        case .two: "2"
+        case .three: "3"
+        case .four: "4"
+        }
     }
 }
