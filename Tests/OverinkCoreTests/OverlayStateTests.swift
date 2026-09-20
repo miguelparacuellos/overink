@@ -29,7 +29,7 @@ func elAtajoArmaSobreLaPantallaDelCursor() {
 
     overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
 
-    #expect(overlay.state == .armed(stage: monitor))
+    #expect(overlay.state.stage == monitor)
 }
 
 @Test("El atajo pulsado de nuevo devuelve el Overlay a Dismissed")
@@ -61,7 +61,7 @@ func pasandoPorDismissedSeCambiaDeStage() {
     overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
     overlay.apply(.toggle(stageUnderCursor: portatil), at: arranque)
 
-    #expect(overlay.state == .armed(stage: portatil))
+    #expect(overlay.state.stage == portatil)
 }
 
 @Test("Esc pasa a Dismissed")
@@ -81,4 +81,50 @@ func descartarEnDismissedEsInocuo() {
     overlay.apply(.dismiss, at: arranque)
 
     #expect(overlay.state == .dismissed)
+}
+
+@Test("Un gesto del Pen deja un Stroke visible")
+func unGestoDelPenDejaUnStrokeVisible() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.penDown(at: Point(x: 10, y: 20)), at: arranque)
+    overlay.apply(.penMoved(to: Point(x: 30, y: 40)), at: arranque)
+    overlay.apply(.penUp, at: arranque)
+
+    #expect(overlay.state.finishedMarkCount == 1)
+}
+
+@Test("Los Strokes reaparecen al volver a armar el Overlay")
+func losStrokesReaparecenAlVolverAArmarElOverlay() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.penDown(at: Point(x: 10, y: 20)), at: arranque)
+    overlay.apply(.penMoved(to: Point(x: 30, y: 40)), at: arranque)
+    overlay.apply(.penUp, at: arranque)
+    overlay.apply(.dismiss, at: arranque)
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+
+    #expect(overlay.state.finishedMarkCount == 1)
+}
+
+@Test("Descartar durante un gesto no termina el Stroke")
+func descartarDuranteUnGestoNoTerminaElStroke() {
+    var overlay = Overlay()
+
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+    overlay.apply(.penDown(at: Point(x: 10, y: 20)), at: arranque)
+    overlay.apply(.penMoved(to: Point(x: 30, y: 40)), at: arranque)
+    overlay.apply(.dismiss, at: arranque)
+    overlay.apply(.toggle(stageUnderCursor: monitor), at: arranque)
+
+    #expect(overlay.state.finishedMarkCount == 0)
+}
+
+private extension OverlayState {
+    var finishedMarkCount: Int {
+        guard case .armed(_, let canvas, _) = self else { return 0 }
+        return canvas.marks.count
+    }
 }

@@ -48,15 +48,20 @@ final class OverlayController {
     /// fuente.
     private func syncWindow() {
         switch overlay.state {
-        case .armed(let stage):
-            show(on: stage)
+        case .armed(let stage, let canvas, let liveStroke):
+            show(on: stage, canvas: canvas, liveStroke: liveStroke)
         case .dismissed:
             hide()
         }
     }
 
-    private func show(on stage: StageID) {
-        guard window == nil else { return }
+    private func show(on stage: StageID, canvas: Canvas, liveStroke: Stroke?) {
+        if let window {
+            let view = window.contentView as? OverlayView
+            view?.canvas = canvas
+            view?.liveStroke = liveStroke
+            return
+        }
 
         // La pantalla del Stage ya no está —se desconectó entre pulsar el atajo y
         // montar—: se descarta en lugar de quedarse en Armed sin ventana, que sería un
@@ -70,6 +75,9 @@ final class OverlayController {
         let view = OverlayView(frame: overlayWindow.contentLayoutRect)
         view.autoresizingMask = [.width, .height]
         view.onKeyDown = { [weak self] event in self?.handle(event) }
+        view.onPointer = { [weak self] command in self?.apply(command) }
+        view.canvas = canvas
+        view.liveStroke = liveStroke
         overlayWindow.contentView = view
 
         // Una app `.accessory` no se activa sola: sin esto la ventana se vería pero el

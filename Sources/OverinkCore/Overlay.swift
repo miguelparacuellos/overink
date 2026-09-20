@@ -3,6 +3,8 @@
 /// core no puede conocer —qué pantalla contiene el cursor— y pinta el resultado.
 public struct Overlay: Sendable {
     public private(set) var state: OverlayState
+    private var canvas = Canvas()
+    private var strokeInProgress: [Point] = []
 
     public init() {
         state = .dismissed
@@ -18,12 +20,49 @@ public struct Overlay: Sendable {
             // El Stage se fija aquí, en el instante de pasar a Armed, y no vuelve a
             // mirarse mientras dure: el atajo pulsado con el cursor en la otra pantalla
             // descarta, nunca mueve el Overlay de sitio.
-            case .dismissed: state = .armed(stage: stageUnderCursor)
-            case .armed: state = .dismissed
+            case .dismissed:
+                state = .armed(stage: stageUnderCursor, canvas: canvas, liveStroke: liveStroke)
+            case .armed:
+                cancelLiveStroke()
+                state = .dismissed
             }
         case .dismiss:
+            cancelLiveStroke()
             state = .dismissed
+        case .penDown(let point):
+            guard case .armed(let stage, _, _) = state else { return }
+
+            // Empezar un gesto nuevo cierra el anterior para que una entrada incompleta
+            // nunca tape el trazo que el usuario ya ha terminado.
+            finishStroke()
+            strokeInProgress = [point]
+            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+        case .penMoved(let point):
+            guard case .armed(let stage, _, _) = state, !strokeInProgress.isEmpty else { return }
+
+            strokeInProgress.append(point)
+            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
+        case .penUp:
+            guard case .armed(let stage, _, _) = state else { return }
+
+            finishStroke()
+            state = .armed(stage: stage, canvas: canvas, liveStroke: liveStroke)
         }
+    }
+
+    private var liveStroke: Stroke? {
+        strokeInProgress.isEmpty ? nil : Stroke(points: strokeInProgress)
+    }
+
+    private mutating func finishStroke() {
+        guard !strokeInProgress.isEmpty else { return }
+
+        canvas.append(.stroke(Stroke(points: strokeInProgress)))
+        strokeInProgress = []
+    }
+
+    private mutating func cancelLiveStroke() {
+        strokeInProgress = []
     }
 }
 
@@ -31,7 +70,12 @@ public struct Overlay: Sendable {
 /// escribe un Label, llega con el Text tool.
 public enum OverlayState: Equatable, Sendable {
     case dismissed
-    case armed(stage: StageID)
+    case armed(stage: StageID, canvas: Canvas, liveStroke: Stroke?)
+
+    public var stage: StageID? {
+        guard case .armed(let stage, _, _) = self else { return nil }
+        return stage
+    }
 }
 
 /// Las intenciones que el core entiende. Son semánticas, nunca eventos de macOS: la
@@ -41,6 +85,56 @@ public enum Command: Equatable, Sendable {
     case toggle(stageUnderCursor: StageID)
     /// Pasar a Dismissed sin pasar por el atajo. Es lo que hace Esc.
     case dismiss
+    /// El Pen empieza, continúa o termina un gesto. La shell traduce sus eventos de
+    /// puntero a estas intenciones; el core no conoce `NSEvent`.
+    case penDown(at: Point)
+    case penMoved(to: Point)
+    case penUp
+}
+
+/// Una coordenada de la superficie del Overlay, independiente de AppKit.
+public struct Point: Equatable, Sendable {
+    public let x: Double
+    public let y: Double
+
+    public init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
+    }
+}
+
+/// El conjunto ordenado de Marks que se han terminado en el Stage actual. Vive fuera del
+/// estado visible del Overlay, así que pasar a Dismissed no lo destruye.
+public struct Canvas: Equatable, Sendable {
+    public private(set) var marks: [Mark]
+
+    public init(marks: [Mark] = []) {
+        self.marks = marks
+    }
+
+    mutating func append(_ mark: Mark) {
+        marks.append(mark)
+    }
+}
+
+/// Una forma terminada que vive en el Canvas. Por ahora el Pen es la única forma; Label
+/// llegará con el Text tool sin cambiar la costura que lee la shell.
+public enum Mark: Equatable, Sendable {
+    case stroke(Stroke)
+}
+
+/// Un Mark vectorial creado con el Pen. Sus puntos no dependen de ningún framework de UI
+/// y su grosor permanece fijo, incluso cuando la entrada procede de una tableta.
+public struct Stroke: Equatable, Sendable {
+    public static let penWidth = 3.0
+
+    public let points: [Point]
+    public let width: Double
+
+    public init(points: [Point], width: Double = Self.penWidth) {
+        self.points = points
+        self.width = width
+    }
 }
 
 /// Identifica una pantalla sin que el core sepa nada de pantallas. La shell la deriva

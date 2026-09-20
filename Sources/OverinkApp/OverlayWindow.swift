@@ -1,4 +1,5 @@
 import AppKit
+import OverinkCore
 
 /// La ventana del Overlay: transparente, sin marco y del tamaño exacto de su Stage.
 ///
@@ -43,11 +44,18 @@ final class OverlayWindow: NSWindow {
     )
 }
 
-/// La vista que ocupa el Overlay. Hoy solo recibe la entrada: el Overlay es transparente
-/// y no pinta nada todavía. El Canvas y el HUD se pintan aquí cuando lleguen sus tickets.
+/// La vista que ocupa el Overlay. Traduce la entrada a comandos y pinta el Canvas que el core
+/// expone; la selección de Tool y el HUD llegarán con sus tickets.
 final class OverlayView: NSView {
     /// Qué hacer con una tecla. La vista no decide nada: traduce y avisa.
     var onKeyDown: ((NSEvent) -> Void)?
+    var onPointer: ((Command) -> Void)?
+    var canvas = Canvas() {
+        didSet { needsDisplay = true }
+    }
+    var liveStroke: Stroke? {
+        didSet { needsDisplay = true }
+    }
 
     // Sin esto la ventana no entrega el teclado a nadie.
     override var acceptsFirstResponder: Bool { true }
@@ -57,5 +65,55 @@ final class OverlayView: NSView {
         // `super`: eso haría sonar el beep de tecla no manejada en todo lo que aún no
         // hace nada.
         onKeyDown?(event)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onPointer?(.penDown(at: point(for: event)))
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        onPointer?(.penMoved(to: point(for: event)))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onPointer?(.penUp)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        NSColor.systemRed.setStroke()
+        let finishedStrokes = canvas.marks.compactMap { mark -> Stroke? in
+            guard case .stroke(let stroke) = mark else { return nil }
+            return stroke
+        }
+        for stroke in finishedStrokes + [liveStroke].compactMap({ $0 }) {
+            let path = NSBezierPath()
+            guard let first = stroke.points.first else { continue }
+
+            path.move(to: NSPoint(x: first.x, y: first.y))
+            for point in stroke.points.dropFirst() {
+                path.line(to: NSPoint(x: point.x, y: point.y))
+            }
+            path.lineWidth = stroke.width
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+
+            if stroke.points.count == 1 {
+                NSBezierPath(ovalIn: NSRect(
+                    x: first.x - stroke.width / 2,
+                    y: first.y - stroke.width / 2,
+                    width: stroke.width,
+                    height: stroke.width
+                )).fill()
+            } else {
+                path.stroke()
+            }
+        }
+    }
+
+    private func point(for event: NSEvent) -> Point {
+        let location = convert(event.locationInWindow, from: nil)
+        return Point(x: location.x, y: location.y)
     }
 }
